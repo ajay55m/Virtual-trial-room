@@ -1,0 +1,194 @@
+# Complete System Design Analysis: Virtual Fitting Room Kiosk System
+
+**Document Title:** Virtual Fitting Room Kiosk: System Design Document  
+**Version:** 0.1 (Draft) | **Date:** 9 October 2026  
+**Target Market:** Textile and clothing brands  
+**Document Status:** For Engineering Review  
+**Analysis Date:** October 2026  
+
+---
+
+## Executive Summary & System Overview
+
+The **Virtual Fitting Room Kiosk System** is an in-store hardware-software solution designed for textile and garment retailers. It enables shoppers to visually "try on" garments photorealistically via GPU-accelerated Virtual Try-On (VTON) diffusion models and receive data-backed size recommendations, without needing physical changing rooms or pre-existing 3D garment assets from brands.
+
+### Primary Operational Flow
+1. **Interactive Touch Kiosk:** Shopper touches screen, accepts explicit privacy consent.
+2. **Edge Vision Pose Guidance:** Real-time MediaPipe vision on the kiosk validates user pose (A-pose, lighting, distance, single person) and auto-captures a high-resolution still.
+3. **API & Validation:** Image uploaded securely with session token to FastAPI gateway; server re-validates image before queuing.
+4. **Queue & Scheduling:** Redis/Celery dispatches job to an isolated GPU worker pool running PyTorch/Diffusers.
+5. **AI Inference & Sizing:** Preprocessing (human parsing, DensePose, garment mask) -> Diffusion VTON generation -> Quality gate paste-back -> Real-time status streamed via WebSocket.
+6. **Result & Ephemeral Cleanup:** Photorealistic image and size recommendation rendered on screen. Session terminates, triggering strict 15-minute TTL purge of all body imagery.
+
+---
+
+## Key Stack Decisions & Architecture Evaluation
+
+The document explicitly details several architectural shifts from initial concepts to ensure production readiness, performance, and legal compliance.
+
+```mermaid
+graph TD
+    subgraph Kiosk Client [Electron Shell + Next.js / React]
+        UI[Touch UI & State Machine]
+        MV[MediaPipe Tasks Vision Web Worker]
+    end
+
+    subgraph Edge & Validation
+        EdgeVal[Edge Pose & Bounding Box Check]
+    end
+
+    subgraph Backend Core [FastAPI Gateway]
+        API[Async REST API / WebSocket Server]
+        SrvVal[Server-side Image Validation & Guardrails]
+    end
+
+    subgraph Message Queue & Sizing
+        Redis[Redis Queue & Event Bus]
+        Celery[Celery Task Dispatcher]
+        Sizing[Sizing & Fit Engine]
+    end
+
+    subgraph GPU Worker Pool [PyTorch / Diffusers]
+        Parse[Person & Garment Preprocessing]
+        VTON[VTON Diffusion Engine CatVTON/IDM-VTON]
+        QGate[Quality Gate & Post-Processing]
+    end
+
+    subgraph Ephemeral & Persistent Data
+        ObjStore[(MinIO / NVMe Object Storage - Ephemeral Images)]
+        PGSQL[(PostgreSQL DB - Catalog, Kiosks, Audit)]
+    end
+
+    UI --> MV
+    MV --> EdgeVal
+    EdgeVal -->|HTTPS Capture Upload| API
+    API --> SrvVal
+    SrvVal --> Redis
+    API -->|Session Measurements| Sizing
+    Redis --> Celery
+    Celery --> Parse
+    Parse --> VTON
+    VTON --> QGate
+    QGate --> ObjStore
+    API -->|WebSocket Job Progress| UI
+```
+
+### Stack Components Breakdown
+
+| Layer | Selected Technologies | Rationale / Key Design Decisions |
+| :--- | :--- | :--- |
+| **Kiosk Shell** | Electron + Next.js (React / TS) + Zustand | Locked-down Electron container with `contextIsolation: true`, `nodeIntegration: false`, strict CSP, and native watchdog auto-restart. |
+| **Edge Vision** | MediaPipe Tasks Vision (`@mediapipe/tasks-vision`) | Runs in Web Worker via GPU delegate. Pose Landmarker (Full/Heavy) + Face Landmarker. Replaces legacy TF.js to eliminate redundant runtime overhead. |
+| **API Gateway** | FastAPI (Python) | High-performance async gateway, Pydantic v2 schemas, OpenAPI specification, mTLS kiosk authentication. Replaces NestJS. |
+| **Queueing** | Redis + Celery | Priority queues (`tryon.interactive`, `tryon.batch`, `ingest.garments`), late acknowledgments (`acks_late=True`), hard 30s queue TTL timeout. |
+| **AI Inference Engine**| PyTorch + Hugging Face Diffusers | Model-adapter pattern (`TryOnModel` interface) supporting CatVTON, IDM-VTON, or custom/commercial models. FP16 baseline. |
+| **Storage Layer** | PostgreSQL + Redis + MinIO/NVMe | PostgreSQL for relational metadata (catalog, kiosks, audit logs). Redis for session state. MinIO/NVMe for encrypted ephemeral image storage (15-min TTL). |
+
+---
+
+## Comprehensive Module-by-Module Analysis
+
+### 1. Edge Vision & Real-Time Pose Guidance
+* **Landmarks & Validation:** Tracks 33 pose landmarks (visibility > 0.5 required) and face landmarks.
+* **Positioning Rules:** Height bounding box (70–90% frame), centered within 10%, yaw < 10°, arms in A-pose, single person enforcement, Laplacian variance sharpness check.
+* **Stability Gate:** Requires 1.0 second of consecutive compliance (filtered via One Euro filter) before auto-triggering 3-2-1 capture countdown.
+* **Output:** Only a single high-res still + landmark coordinates are transmitted over HTTPS. No continuous video feed leaves the kiosk.
+
+### 2. AI Inference Pipeline & VTON Architecture
+* **Preprocessing:** Person segmentation, human parsing (SCHP/DensePose), garment mask creation, face/hair/skin preservation masks.
+* **Garment Preprocessing:** Flat-lay or ghost mannequin background removal, category classification.
+* **Model Adapter Pattern:** Abstract interface allows swappable backend models to mitigate licensing and quality risks:
+  ```python
+  class TryOnModel:
+      def load(self, device, dtype) -> None: ...
+      def preprocess_person(self, image, meta) -> PersonInputs: ...
+      def preprocess_garment(self, image, category) -> GarmentInputs: ...
+      def generate(self, person, garment, params, progress_cb) -> Image: ...
+      def version(self) -> str: ...
+      def license_info(self) -> LicenseInfo: ...
+  ```
+* **Optimization Progression:** FP16 PyTorch -> FlashAttention -> Reduced diffusion steps -> `torch.compile` / CUDA graphs -> TensorRT/ONNX.
+
+### 3. Sizing and Fit Engine
+* **The Reality:** Diffusion VTON models generate visual appearance, not physical fit.
+* **Dual Approach:**
+  * *Option A (RGB-only):* SMPL body shape regression model from captured photo + optional user height input.
+  * *Option B (Depth Sensor):* Metric 3D measurement using Intel RealSense or Orbbec.
+* **Fit Logic:** Matches estimated circumferences (chest, waist, hip, inseam, shoulder) against brand size charts, factoring in garment stretch class and fit intent (slim/relaxed). Features an **"Honesty Rule"**: alerts the user if fit is poor even if the generated AI image looks aesthetically pleasing.
+
+### 4. Garment Ingestion & Catalog Pipeline
+* Accepts product images (flat-lay, ghost mannequin, or on-model) + CSV/Shopify/PIM feeds.
+* Automated background removal, attribute tagging, and **Try-On Suitability Scoring** (pre-evaluates items against reference body types to auto-flag complex fabrics like sheer, lace, or heavy stripes).
+* Throughput goal: 200 SKUs/day per operator.
+
+---
+
+## Latency Budget & Performance Analysis
+
+| Stage | Target Latency Budget | Notes / Dependencies |
+| :--- | :---: | :--- |
+| **Capture & Client Validation** | 0.3 s | MediaPipe Web Worker stability gate |
+| **Upload to Gateway** | 0.5 s | 1080p JPEG over store Wi-Fi/Ethernet |
+| **Server Validation & Enqueue** | 0.2 s | FASTApi async check + Redis enqueue |
+| **Queue Wait (p50)** | 0.5 s | Sized worker pool |
+| **Person & Garment Preprocessing**| 0.8 s | Parsing & DensePose execution |
+| **Diffusion Generation** | 3.5 – 6.0 s | FP16 UNet generation |
+| **Postprocessing & Quality Gate** | 0.5 s | Paste-back & identity check |
+| **Result Delivery & Render** | 0.3 s | Signed URL delivery over WebSocket |
+| **Total Latency Budget** | **6.6 s – 9.1 s** | **p50 target < 8s, p95 < 15s** |
+
+> [!NOTE]
+> The sub-4 second stretch goal requires heavy UNet distillation, lower working resolution, or TensorRT engine compilation. The document pragmatically advises designing the UX for an 8–10 second expectation with live progress bars and intermediate low-res previews.
+
+---
+
+## Security, Privacy & Compliance Architecture
+
+> [!IMPORTANT]
+> Full-body imagery and physical measurements constitute **biometric and sensitive personal data** under GDPR, CCPA, and Illinois BIPA.
+
+* **Ephemeral Imagery Lifecycle:** Person stills and intermediate masks are stored in encrypted object storage (MinIO/NVMe) with a **hard 15-minute TTL** and automatic deletion upon session finish.
+* **Database Isolation:** PostgreSQL stores zero personal imagery or biometric templates—only session UUIDs, timestamp metadata, and audit logs.
+* **Kiosk OS Hardening:** Hardware ports disabled, BIOS password locked, OS shell restricted via Windows Assigned Access / Linux Kiosk mode, full-disk encryption enabled.
+* **Network & Device Security:** Kiosks issue mTLS device certificates; secrets kept in vault (never in Electron app bundle); per-kiosk rate limits enforced.
+
+---
+
+## PostgreSQL Core Schema (Summary)
+
+The relational schema strictly decouples catalog/fleet data from user imagery:
+
+```
+[ brands ] <--- [ garments ] <--- [ garment_assets ]
+                       |
+                       +<--- [ garment_sizes ]
+                       |
+                 [ size_charts ] ---> [ size_chart_rows ]
+
+[ kiosks ] <--- [ sessions ] <--- [ jobs ]
+                       |
+                       +<--- [ size_recommendations ]
+
+[ audit_events ] (Append-only logging)
+```
+
+---
+
+## Risk Matrix & Mitigation Strategies
+
+| Risk Factor | Likelihood | Impact | Proposed Mitigation Strategy |
+| :--- | :---: | :---: | :--- |
+| **VTON Model Licensing** | High | Critical | Phase 0 legal gate; decoupled `TryOnModel` adapter interface; commercial model API fallback. |
+| **Textured/Sheer Fabric Failures**| High | High | Automated suitability score in ingestion pipeline; hard fabric regression test suite (stripes, lace, knits). |
+| **Sizing Inaccuracy** | Medium | High | Tape-measurement ground truth validation on 100+ volunteers; confidence rating display; optional depth camera upgrade. |
+| **GPU Infrastructure Costs** | Medium | High | Capacity planning model; Redis result caching within sessions; catalog prewarming; start with cloud GPUs (RunPod/Modal/L4) before on-prem. |
+| **Biometric Legal Liability** | Medium | Critical | Explicit on-screen consent flow, zero persistent image storage, strict 15-min TTL purge, regional legal audit. |
+
+---
+
+## Key Open Decisions & Recommendations for Engineering
+
+1. **VTON Model Selection & Commercial Rights:** Prioritize Phase 0 legal audit of weights and dataset licenses (VITON-HD vs commercial proprietary alternatives).
+2. **Depth vs RGB Sizing:** Validate RGB-only shape regression accuracy on 100 volunteers first; keep hardware design modular to support optional USB Depth cameras (RealSense).
+3. **GPU Deployment Strategy:** Launch Phase 1-2 on elastic cloud GPUs (L4 / L40S) to avoid initial capital expenditure, transitioning to dedicated datacenter nodes once kiosk utilization stabilizes.
+4. **Take-Home Result Options:** If QR code or Email sharing is desired by brands, implement a separate explicit opt-in privacy agreement detached from the default ephemeral kiosk session.
