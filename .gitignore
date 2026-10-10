@@ -1,21 +1,39 @@
-# Logs
-logs
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+dist-ssr/
+*.local
 *.log
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Python / Backend
+__pycache__/
+*/__pycache__/
+*/*/__pycache__/
+*/*/*/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.env
+backend/.env
+venv/
+.venv/
+env/
+*.sqlite3
+*.sqlite
+*.db
 
-# Editor directories and files
+# Ephemeral Session Captures
+frontend/public/assets/captures/
+public/assets/captures/
+
+# IDEs & System
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*

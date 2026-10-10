@@ -5,6 +5,8 @@ import { kioskAudio } from '../utils/audio';
 
 interface ResultViewProps {
   originalPhotoUri: string;
+  tryonResultUri?: string;
+  sizeRecommendation?: SizeRecommendation;
   garment: Garment;
   selectedSize: string;
   onTryAnother: () => void;
@@ -13,6 +15,8 @@ interface ResultViewProps {
 
 export const ResultView: React.FC<ResultViewProps> = ({
   originalPhotoUri,
+  tryonResultUri,
+  sizeRecommendation,
   garment,
   selectedSize,
   onTryAnother,
@@ -23,8 +27,8 @@ export const ResultView: React.FC<ResultViewProps> = ({
   const [emailSent, setEmailSent] = useState(false);
   const [showQr, setShowQr] = useState(false);
 
-  // Mocked measurement & sizing engine output
-  const recommendation: SizeRecommendation = {
+  // Dynamic recommendation from model pipeline with fallback
+  const recommendation: SizeRecommendation = sizeRecommendation || {
     recommendedSize: 'M',
     confidence: 0.94,
     fitClass: 'Regular',
@@ -66,7 +70,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
           {/* Main Image Display */}
           <div className="relative w-full max-h-[62vh] rounded-2xl overflow-hidden border border-slate-800 flex items-center justify-center bg-slate-950">
             <img
-              src={showOriginal ? originalPhotoUri : garment.tryonResultImage}
+              src={showOriginal ? originalPhotoUri : (tryonResultUri || garment.tryonResultImage)}
               alt="VTON Try-On Result"
               className="w-full h-full object-contain max-h-[58vh] transition-all duration-500"
             />

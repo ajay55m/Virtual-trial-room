@@ -11,11 +11,16 @@ import { GeneratingPipeline } from './components/GeneratingPipeline';
 import { ResultView } from './components/ResultView';
 import { AdminModal } from './components/AdminModal';
 
+import { apiService } from './services/api';
+
 export function App() {
   const [currentState, setCurrentState] = useState<KioskState>('IDLE');
+  const [sessionId, setSessionId] = useState<string>('');
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [capturedPhotoUri, setCapturedPhotoUri] = useState<string>('/assets/demo_person.jpg');
+  const [tryonResultUri, setTryonResultUri] = useState<string>('');
+  const [sizeRecommendation, setSizeRecommendation] = useState<any>(null);
   const [poseMetrics, setPoseMetrics] = useState<PoseQualityMetrics>({
     sharpnessVariance: 420,
     bodyHeightPercent: 82,
@@ -60,9 +65,15 @@ export function App() {
     setCurrentState('CONSENT');
   };
 
-  const handleConsentAgree = () => {
+  const handleConsentAgree = async () => {
     setShowConsentModal(false);
     setCurrentState('POSITIONING');
+    try {
+      const sess = await apiService.createSession(175.0, 'Unisex');
+      setSessionId(sess.sessionId);
+    } catch (e) {
+      console.warn('Session initialization fallback:', e);
+    }
   };
 
   const handleConsentDecline = () => {
@@ -70,10 +81,17 @@ export function App() {
     handleResetSession();
   };
 
-  const handlePhotoCaptured = (uri: string, metrics: PoseQualityMetrics) => {
+  const handlePhotoCaptured = async (uri: string, metrics: PoseQualityMetrics) => {
     setCapturedPhotoUri(uri);
     setPoseMetrics(metrics);
     setCurrentState('REVIEW');
+    if (sessionId) {
+      try {
+        await apiService.uploadCapture(sessionId, uri);
+      } catch (e) {
+        console.warn('Capture upload fallback:', e);
+      }
+    }
   };
 
   const handleReviewConfirm = () => {
@@ -86,7 +104,13 @@ export function App() {
     setCurrentState('GENERATING');
   };
 
-  const handleGenerationComplete = () => {
+  const handleGenerationComplete = (resultImageUrl: string, recommendation?: any) => {
+    if (resultImageUrl) {
+      setTryonResultUri(resultImageUrl);
+    }
+    if (recommendation) {
+      setSizeRecommendation(recommendation);
+    }
     setCurrentState('RESULT');
   };
 
@@ -95,6 +119,9 @@ export function App() {
     setShowConsentModal(false);
     setShowAdminModal(false);
     setInactivitySec(60);
+    setCapturedPhotoUri('/assets/demo_person.jpg');
+    setTryonResultUri('');
+    setSizeRecommendation(null);
   };
 
   return (
@@ -135,6 +162,8 @@ export function App() {
 
         {currentState === 'GENERATING' && (
           <GeneratingPipeline
+            sessionId={sessionId}
+            userPhotoUri={capturedPhotoUri}
             garment={selectedGarment}
             selectedSize={selectedSize}
             onComplete={handleGenerationComplete}
@@ -144,6 +173,8 @@ export function App() {
         {currentState === 'RESULT' && (
           <ResultView
             originalPhotoUri={capturedPhotoUri}
+            tryonResultUri={tryonResultUri}
+            sizeRecommendation={sizeRecommendation}
             garment={selectedGarment}
             selectedSize={selectedSize}
             onTryAnother={() => setCurrentState('CATALOG')}
