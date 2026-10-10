@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
+    # Generative AI Try-On Providers
+    TRYON_PROVIDER: str = "huggingface" # "huggingface", "fal", "fashn", "local"
+    HF_TOKEN: str = ""
+    FAL_KEY: str = ""
+    FASHN_API_KEY: str = ""
+
     # CORS
     CORS_ORIGINS: Union[str, List[str]] = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
 
