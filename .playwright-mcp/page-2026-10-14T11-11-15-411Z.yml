@@ -1,0 +1,22 @@
+- main [ref=e4]:
+  - generic [ref=e5] [cursor=pointer]:
+    - generic [ref=e6]:
+      - generic [ref=e12]:
+        - generic [ref=e13]: VirtualFit
+        - generic [ref=e14]: SPATIAL STUDIO
+      - generic [ref=e15]: 15-MINUTE EPHEMERAL PRIVACY
+    - generic [ref=e21]:
+      - generic [ref=e22]: AI Virtual Try-On 2.0 Ready
+      - heading "Try all the variants virtually, as much as you like with Virtualfit" [level=1] [ref=e25]
+      - paragraph [ref=e26]: Experience real-time photorealistic clothing simulation and personalized body size regression in full spatial glass comfort.
+      - button "TOUCH SCREEN TO ENTER" [ref=e28]
+    - generic [ref=e32]:
+      - generic [ref=e33]:
+        - generic [ref=e34]: Instant Photo Try-On
+        - generic [ref=e38]: Try garments directly from flatlay photos
+      - generic [ref=e39]:
+        - generic [ref=e40]: Precision Fit Engine
+        - generic [ref=e48]: Instant chest, waist, and hip size recommendation
+      - generic [ref=e49]:
+        - generic [ref=e50]: 100% Ephemeral Storage
+        - generic [ref=e55]: Zero biometric storage, auto-purged in 15m

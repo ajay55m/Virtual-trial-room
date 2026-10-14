@@ -1,0 +1,44 @@
+- generic [ref=e3]:
+  - banner [ref=e43]:
+    - generic [ref=e44]:
+      - 'button "AURA KIOSK #04 AI VIRTUAL FITTING ROOM SYSTEM" [ref=e45]':
+        - generic [ref=e46]: "AURA KIOSK #04"
+        - generic [ref=e47]: AI VIRTUAL FITTING ROOM SYSTEM
+      - generic [ref=e49]: mTLS SECURED
+    - generic [ref=e52]: POSITIONING
+    - generic [ref=e54]:
+      - button "Toggle Feedback Sound" [ref=e55]
+      - button "DIAGNOSTICS" [ref=e60]
+      - generic [ref=e65]: 07:29:37 AM
+  - main [ref=e4]:
+    - generic [ref=e116]:
+      - generic [ref=e117]:
+        - generic:
+          - generic: A-POSE SILHOUETTE ALIGNMENT
+          - generic: Hold pose steady inside outline...
+        - generic [ref=e119]:
+          - button "● Live Laptop Camera" [ref=e120]
+          - button "Mirrored" [ref=e125]
+          - 'button "Demo: Female Model" [ref=e132]'
+          - 'button "Demo: Male Model" [ref=e133]'
+          - button "Upload Custom Photo" [ref=e134]
+      - generic [ref=e139]:
+        - generic [ref=e140]:
+          - generic [ref=e141]: MEDIAPIPE TASKS VISION v0.10
+          - heading "Pose Quality Rules" [level=3] [ref=e147]
+          - generic [ref=e148]:
+            - generic [ref=e149]: 33 Landmarks Visible (>0.5)
+            - generic [ref=e154]: Bounding Box Height (84%)
+            - generic [ref=e159]: Horizontal Centering (1% off)
+            - generic [ref=e164]: Shoulder & Hip Yaw (<10°)
+            - generic [ref=e169]: Single Person Check
+            - generic [ref=e174]:
+              - generic [ref=e175]: Laplacian Variance Sharpness
+              - generic [ref=e176]: 480 (PASS)
+          - generic [ref=e178]:
+            - generic [ref=e179]: Stability Gate (1.0s)
+            - generic [ref=e180]: 80%
+        - generic [ref=e183]:
+          - button "CAPTURE STILL NOW" [ref=e184]
+          - button "OR UPLOAD FULL-SIZE PHOTO" [ref=e189]
+          - button "CANCEL SESSION" [ref=e194]

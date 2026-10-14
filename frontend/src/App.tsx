@@ -18,7 +18,7 @@ export function App() {
   const [sessionId, setSessionId] = useState<string>('');
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
-  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string>('/assets/demo_person.jpg');
+  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string>('/assets/virtualfit_model_tshirt.jpg');
   const [tryonResultUri, setTryonResultUri] = useState<string>('');
   const [sizeRecommendation, setSizeRecommendation] = useState<any>(null);
   const [poseMetrics, setPoseMetrics] = useState<PoseQualityMetrics>({
@@ -33,8 +33,8 @@ export function App() {
   const [selectedGarment, setSelectedGarment] = useState<Garment>(MOCK_GARMENTS[0]);
   const [selectedSize, setSelectedSize] = useState<string>('M');
 
-  // Inactivity timeout counter (default 60s, warns at 15s)
-  const [inactivitySec, setInactivitySec] = useState(60);
+  // Inactivity timeout counter (default 300s, warns at 15s)
+  const [inactivitySec, setInactivitySec] = useState(300);
 
   useEffect(() => {
     if (currentState === 'IDLE') return;
@@ -43,13 +43,13 @@ export function App() {
       setInactivitySec((prev) => {
         if (prev <= 1) {
           handleResetSession();
-          return 60;
+          return 300;
         }
         return prev - 1;
       });
     }, 1000);
 
-    const resetInactivity = () => setInactivitySec(60);
+    const resetInactivity = () => setInactivitySec(300);
     window.addEventListener('touchstart', resetInactivity);
     window.addEventListener('click', resetInactivity);
 
@@ -118,14 +118,14 @@ export function App() {
     setCurrentState('IDLE');
     setShowConsentModal(false);
     setShowAdminModal(false);
-    setInactivitySec(60);
-    setCapturedPhotoUri('/assets/demo_person.jpg');
+    setInactivitySec(300);
+    setCapturedPhotoUri('/assets/virtualfit_model_tshirt.jpg');
     setTryonResultUri('');
     setSizeRecommendation(null);
   };
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden flex flex-col bg-slate-950 text-slate-100 select-none">
+    <div className="relative w-screen h-screen overflow-hidden flex flex-col text-slate-900 select-none bg-transparent">
       {/* Top Header */}
       <Header
         currentState={currentState}
@@ -135,7 +135,7 @@ export function App() {
       />
 
       {/* Main Kiosk Screen Viewport */}
-      <main className="flex-1 relative w-full h-full overflow-hidden">
+      <main className="flex-1 relative w-full h-full overflow-y-auto">
         {currentState === 'IDLE' && (
           <IdleScreen onStart={handleStartSession} />
         )}

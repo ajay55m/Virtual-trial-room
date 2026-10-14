@@ -14,13 +14,14 @@ interface VideoDevice {
 }
 
 export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured, onCancel }) => {
-  const [useWebcam, setUseWebcam] = useState(true); // Default to real laptop camera
+  const [useWebcam, setUseWebcam] = useState(true);
+  const [demoModel, setDemoModel] = useState<'female' | 'male'>('male');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [videoDevices, setVideoDevices] = useState<VideoDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [isMirrored, setIsMirrored] = useState(true);
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [stabilityTime, setStabilityTime] = useState(0); // 0 to 1.0s
+  const [stabilityTime, setStabilityTime] = useState(0);
   const [streamActive, setStreamActive] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -28,7 +29,6 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Dynamic calculated metrics state
   const metrics: PoseQualityMetrics = {
     sharpnessVariance: useWebcam ? 480 : 420,
     bodyHeightPercent: 84,
@@ -39,7 +39,6 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
     stabilityTimeSec: stabilityTime
   };
 
-  // Enumerate available camera devices
   const getCameraDevices = async () => {
     try {
       if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -59,7 +58,6 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
     }
   };
 
-  // Start or switch webcam stream
   const startCamera = async (deviceId?: string) => {
     setCameraError(null);
     if (streamRef.current) {
@@ -102,7 +100,6 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
     }
   };
 
-  // Manage webcam lifecycle
   useEffect(() => {
     if (useWebcam) {
       startCamera(selectedDeviceId || undefined);
@@ -122,7 +119,6 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
     };
   }, [useWebcam, selectedDeviceId]);
 
-  // Pose stability countdown loop
   useEffect(() => {
     const interval = setInterval(() => {
       setStabilityTime((prev) => {
@@ -159,7 +155,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
   }, [countdown]);
 
   const captureVideoFrame = (): string => {
-    if (!videoRef.current || !canvasRef.current) return '/assets/demo_person.jpg';
+    if (!videoRef.current || !canvasRef.current) return '/assets/virtualfit_model_tshirt.jpg';
     const canvas = canvasRef.current;
     const video = videoRef.current;
 
@@ -177,7 +173,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
       ctx.drawImage(video, 0, 0, width, height);
       return canvas.toDataURL('image/jpeg', 0.95);
     }
-    return '/assets/demo_person.jpg';
+    return '/assets/virtualfit_model_tshirt.jpg';
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -203,15 +199,17 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
     reader.readAsDataURL(file);
   };
 
+  const demoImageUri = demoModel === 'female' ? '/assets/demo_person.jpg' : '/assets/virtualfit_model_tshirt.jpg';
+
   const triggerCapture = () => {
     const targetImage = useWebcam && streamActive
       ? captureVideoFrame()
-      : '/assets/demo_person.jpg';
+      : demoImageUri;
     onCaptured(targetImage, metrics);
   };
 
   return (
-    <div className="relative w-full h-full min-h-[calc(100vh-5rem)] flex flex-col p-6 select-none bg-slate-950">
+    <div className="relative w-full h-full min-h-[calc(100vh-5rem)] flex flex-col p-6 select-none overflow-y-auto">
       <canvas ref={canvasRef} className="hidden" />
       <input
         ref={fileInputRef}
@@ -224,7 +222,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
       {/* Main Vision Interface Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full flex-1">
         {/* Left 3 cols: Live Video Feed / Silhouette HUD */}
-        <div className="lg:col-span-3 glass-panel rounded-3xl overflow-hidden relative border border-indigo-500/30 flex items-center justify-center bg-slate-900 min-h-[60vh]">
+        <div className="lg:col-span-3 spatial-glass rounded-[2.5rem] overflow-hidden relative border border-white/80 flex items-center justify-center min-h-[60vh] shadow-2xl">
           {/* Feed Content */}
           {useWebcam ? (
             <video
@@ -236,40 +234,37 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
             />
           ) : (
             <img
-              src="/assets/demo_person.jpg"
+              src={demoImageUri}
               alt="Guided Pose Demo"
               className="w-full h-full object-contain max-h-[75vh]"
             />
           )}
 
-          {/* Futuristic Silhouette Overlay & Skeleton HUD */}
+          {/* Silhouette Overlay & Skeleton HUD */}
           <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
             {/* Corner Bracket HUD */}
-            <div className="absolute top-6 left-6 w-12 h-12 border-t-2 border-l-2 border-indigo-400/80 rounded-tl-xl" />
-            <div className="absolute top-6 right-6 w-12 h-12 border-t-2 border-r-2 border-indigo-400/80 rounded-tr-xl" />
-            <div className="absolute bottom-6 left-6 w-12 h-12 border-b-2 border-l-2 border-indigo-400/80 rounded-bl-xl" />
-            <div className="absolute bottom-6 right-6 w-12 h-12 border-b-2 border-r-2 border-indigo-400/80 rounded-br-xl" />
-
-            {/* Scanning Line Animation */}
-            <div className="absolute inset-x-8 h-0.5 bg-gradient-to-r from-transparent via-indigo-400 to-transparent animate-scan" />
+            <div className="absolute top-6 left-6 w-12 h-12 border-t-2 border-l-2 border-slate-800/80 rounded-tl-2xl" />
+            <div className="absolute top-6 right-6 w-12 h-12 border-t-2 border-r-2 border-slate-800/80 rounded-tr-2xl" />
+            <div className="absolute bottom-6 left-6 w-12 h-12 border-b-2 border-l-2 border-slate-800/80 rounded-bl-2xl" />
+            <div className="absolute bottom-6 right-6 w-12 h-12 border-b-2 border-r-2 border-slate-800/80 rounded-br-2xl" />
 
             {/* Silhouette Outline Guide */}
             <div
               className={`w-72 h-[75%] border-2 rounded-full flex flex-col items-center justify-between p-6 transition-all duration-500 ${
-                stabilityTime >= 1.0 ? 'border-emerald-400/80 bg-emerald-500/10' : 'border-indigo-400/50 bg-indigo-500/5'
+                stabilityTime >= 1.0 ? 'border-emerald-600/90 bg-emerald-500/15' : 'border-slate-800/60 bg-white/10'
               }`}
             >
-              <div className="w-16 h-16 rounded-full border border-indigo-300/40 mt-4" />
-              <div className="w-full border-t border-indigo-300/30 my-auto" />
-              <div className="text-[10px] font-mono text-indigo-300 bg-slate-900/80 px-3 py-1 rounded-full border border-indigo-500/30">
-                A-POSE SILHOUETTE ALIGNMENT
+              <div className="w-16 h-16 rounded-full border border-slate-700/50 mt-4" />
+              <div className="w-full border-t border-slate-700/40 my-auto" />
+              <div className="text-[10px] font-mono font-bold text-slate-800 spatial-pill px-3 py-1 border border-white/80 shadow-xs">
+                A-POSE ALIGNMENT
               </div>
             </div>
 
             {/* Active Floating Prompt */}
-            <div className="absolute bottom-8 bg-slate-900/90 border border-slate-700 px-6 py-3 rounded-2xl backdrop-blur-md flex items-center gap-3 shadow-xl">
-              <Sparkles className="w-5 h-5 text-indigo-400 animate-spin" style={{ animationDuration: '4s' }} />
-              <span className="text-sm font-semibold text-white tracking-wide">
+            <div className="absolute bottom-8 spatial-glass px-6 py-3 rounded-full border border-white/90 flex items-center gap-3 shadow-xl">
+              <Sparkles className="w-5 h-5 text-indigo-700 animate-spin" style={{ animationDuration: '4s' }} />
+              <span className="text-sm font-bold text-slate-900 tracking-wide">
                 {stabilityTime < 1.0 ? 'Hold pose steady inside outline...' : 'Pose locked! Keep still...'}
               </span>
             </div>
@@ -277,11 +272,11 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
 
           {/* Countdown Overlay */}
           {countdown !== null && (
-            <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-md flex flex-col items-center justify-center z-30">
-              <div className="text-9xl font-black text-transparent bg-clip-text bg-gradient-to-br from-indigo-300 via-purple-300 to-pink-400 animate-ping">
+            <div className="absolute inset-0 bg-white/70 backdrop-blur-md flex flex-col items-center justify-center z-30">
+              <div className="text-9xl font-black text-slate-900 animate-ping">
                 {countdown > 0 ? countdown : 'FLASH'}
               </div>
-              <div className="text-xl font-bold text-white tracking-widest mt-6">CAPTURING STILL</div>
+              <div className="text-xl font-extrabold text-slate-800 tracking-widest mt-6">CAPTURING FRAME</div>
             </div>
           )}
 
@@ -289,26 +284,26 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
           <div className="absolute top-6 left-6 z-20 flex flex-wrap items-center gap-2 max-w-[90%]">
             <button
               onClick={() => setUseWebcam(!useWebcam)}
-              className={`px-4 py-2 rounded-xl border text-xs font-semibold flex items-center gap-2 backdrop-blur-md transition-all ${
+              className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shadow-xs transition-all border ${
                 useWebcam
-                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                  : 'bg-slate-900/80 border-slate-700 text-slate-300 hover:text-white'
+                  ? 'spatial-pill-active border-white text-slate-900'
+                  : 'spatial-pill border-white/70 text-slate-700 hover:bg-white/60'
               }`}
             >
-              <Video className="w-4 h-4 text-indigo-400" />
-              <span>{useWebcam ? '● Live Laptop Camera' : 'Switch to Laptop Camera'}</span>
+              <Video className="w-4 h-4 text-slate-800" />
+              <span>{useWebcam ? '● Live Laptop Camera' : 'Switch to Live Camera'}</span>
             </button>
 
             {useWebcam && videoDevices.length > 1 && (
-              <div className="flex items-center gap-1.5 bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-1.5 backdrop-blur-md">
-                <Settings2 className="w-3.5 h-3.5 text-slate-400" />
+              <div className="flex items-center gap-1.5 spatial-pill rounded-full px-3 py-1.5 border border-white/70 shadow-xs">
+                <Settings2 className="w-3.5 h-3.5 text-slate-600" />
                 <select
                   value={selectedDeviceId}
                   onChange={(e) => setSelectedDeviceId(e.target.value)}
-                  className="bg-transparent text-xs text-slate-200 outline-none cursor-pointer"
+                  className="bg-transparent text-xs text-slate-800 outline-none cursor-pointer font-semibold"
                 >
                   {videoDevices.map((d) => (
-                    <option key={d.deviceId} value={d.deviceId} className="bg-slate-900 text-white">
+                    <option key={d.deviceId} value={d.deviceId} className="bg-white text-slate-900">
                       {d.label}
                     </option>
                   ))}
@@ -319,90 +314,111 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
             {useWebcam && (
               <button
                 onClick={() => setIsMirrored(!isMirrored)}
-                className="px-3 py-2 rounded-xl bg-slate-900/80 border border-slate-700 text-xs font-medium text-slate-300 hover:text-white flex items-center gap-1.5 backdrop-blur-md"
+                className="px-3 py-2 rounded-full spatial-pill border border-white/70 text-xs font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-1.5 shadow-xs"
                 title="Toggle Mirror Feed"
               >
-                <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
+                <RefreshCw className="w-3.5 h-3.5 text-slate-700" />
                 <span>{isMirrored ? 'Mirrored' : 'Unmirrored'}</span>
               </button>
             )}
 
             <button
-              onClick={() => setUseWebcam(false)}
-              className="px-3 py-2 rounded-xl bg-slate-900/80 border border-slate-700 text-xs font-medium text-slate-400 hover:text-white backdrop-blur-md"
+              onClick={() => {
+                setUseWebcam(false);
+                setDemoModel('male');
+              }}
+              className={`px-3.5 py-2 rounded-full border text-xs font-bold transition-all ${
+                !useWebcam && demoModel === 'male'
+                  ? 'spatial-pill-active border-white text-slate-900 shadow-xs'
+                  : 'spatial-pill border-white/70 text-slate-700 hover:text-slate-900'
+              }`}
             >
-              Use Studio Demo Photo
+              Demo Model: Male
+            </button>
+
+            <button
+              onClick={() => {
+                setUseWebcam(false);
+                setDemoModel('female');
+              }}
+              className={`px-3.5 py-2 rounded-full border text-xs font-bold transition-all ${
+                !useWebcam && demoModel === 'female'
+                  ? 'spatial-pill-active border-white text-slate-900 shadow-xs'
+                  : 'spatial-pill border-white/70 text-slate-700 hover:text-slate-900'
+              }`}
+            >
+              Demo Model: Female
             </button>
 
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2 rounded-xl bg-indigo-600/40 border border-indigo-400/60 text-xs font-bold text-white hover:bg-indigo-600/70 flex items-center gap-2 backdrop-blur-md transition-all shadow-lg"
+              className="px-4 py-2 rounded-full spatial-btn-glass text-xs font-bold text-slate-900 flex items-center gap-2 shadow-xs border border-white"
             >
-              <Upload className="w-3.5 h-3.5 text-indigo-300" />
-              <span>Upload Full Size Photo</span>
+              <Upload className="w-3.5 h-3.5 text-slate-700" />
+              <span>Upload Custom Photo</span>
             </button>
           </div>
 
           {/* Camera Error / Warning Notice */}
           {cameraError && (
-            <div className="absolute top-20 left-6 z-20 bg-amber-950/80 border border-amber-500/40 text-amber-300 text-xs px-4 py-2 rounded-xl backdrop-blur-md flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+            <div className="absolute top-20 left-6 z-20 spatial-glass border border-amber-500/40 text-amber-900 text-xs px-4 py-2 rounded-2xl flex items-center gap-2 font-medium">
+              <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
               <span>{cameraError}</span>
             </div>
           )}
         </div>
 
         {/* Right Col: MediaPipe Rule Quality Inspector */}
-        <div className="glass-panel rounded-3xl p-6 border border-slate-800 flex flex-col justify-between">
+        <div className="spatial-glass rounded-[2.5rem] p-6 border border-white/80 shadow-2xl flex flex-col justify-between">
           <div>
-            <div className="flex items-center gap-2 text-indigo-400 font-mono text-xs tracking-wider mb-2">
+            <div className="flex items-center gap-2 text-indigo-700 font-mono text-xs font-bold tracking-wider mb-2">
               <UserCheck className="w-4 h-4" />
-              <span>MEDIAPIPE TASKS VISION v0.10</span>
+              <span>MEDIAPIPE TASKS VISION</span>
             </div>
-            <h3 className="text-xl font-bold text-white mb-6">Pose Quality Rules</h3>
+            <h3 className="text-xl font-extrabold text-slate-900 mb-6">Pose Quality Rules</h3>
 
             {/* Validation Checklist */}
-            <div className="space-y-3.5 text-xs">
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <span className="text-slate-300">33 Landmarks Visible (&gt;0.5)</span>
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <div className="space-y-2.5 text-xs">
+              <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
+                <span className="text-slate-700 font-medium">33 Landmarks Visible (&gt;0.5)</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               </div>
 
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <span className="text-slate-300">Bounding Box Height (84%)</span>
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
+                <span className="text-slate-700 font-medium">Bounding Box Height (84%)</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               </div>
 
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <span className="text-slate-300">Horizontal Centering (1% off)</span>
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
+                <span className="text-slate-700 font-medium">Horizontal Centering (1% off)</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               </div>
 
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <span className="text-slate-300">Shoulder &amp; Hip Yaw (&lt;10°)</span>
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
+                <span className="text-slate-700 font-medium">Shoulder &amp; Hip Yaw (&lt;10°)</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               </div>
 
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <span className="text-slate-300">Single Person Check</span>
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
+                <span className="text-slate-700 font-medium">Single Person Check</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               </div>
 
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <span className="text-slate-300">Laplacian Variance Sharpness</span>
-                <span className="font-mono text-indigo-400">{useWebcam ? '480 (PASS)' : '420 (PASS)'}</span>
+              <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
+                <span className="text-slate-700 font-medium">Laplacian Sharpness</span>
+                <span className="font-mono font-bold text-slate-900">{useWebcam ? '480 (PASS)' : '420 (PASS)'}</span>
               </div>
             </div>
 
             {/* Stability Progress Bar */}
-            <div className="mt-8">
-              <div className="flex justify-between text-xs font-semibold mb-2">
-                <span className="text-slate-300">Stability Gate (1.0s)</span>
-                <span className="text-indigo-400 font-mono">{Math.round(stabilityTime * 100)}%</span>
+            <div className="mt-6">
+              <div className="flex justify-between text-xs font-bold mb-2">
+                <span className="text-slate-700">Stability Gate (1.0s)</span>
+                <span className="text-indigo-800 font-mono">{Math.round(stabilityTime * 100)}%</span>
               </div>
-              <div className="h-3 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border border-slate-800">
+              <div className="h-3 w-full bg-white/40 rounded-full overflow-hidden p-0.5 border border-white/70 shadow-inner">
                 <div
-                  className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 rounded-full transition-all duration-200"
+                  className="h-full bg-gradient-to-r from-indigo-600 to-emerald-500 rounded-full transition-all duration-200"
                   style={{ width: `${stabilityTime * 100}%` }}
                 />
               </div>
@@ -410,10 +426,10 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
           </div>
 
           {/* Action Buttons */}
-          <div className="space-y-3 mt-6">
+          <div className="space-y-2.5 mt-6">
             <button
               onClick={triggerCapture}
-              className="w-full py-4 px-6 rounded-2xl glass-button text-white font-bold tracking-wider flex items-center justify-center gap-3 border border-white/20 active:scale-98"
+              className="w-full py-4 px-6 rounded-2xl spatial-btn-primary text-white font-bold tracking-wider flex items-center justify-center gap-3 shadow-xl active:scale-98"
             >
               <Camera className="w-5 h-5" />
               <span>CAPTURE STILL NOW</span>
@@ -421,15 +437,15 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
 
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="w-full py-3.5 px-4 rounded-xl bg-indigo-950/70 border border-indigo-500/50 text-indigo-200 hover:text-white text-xs font-bold flex items-center justify-center gap-2 transition-all hover:bg-indigo-900/70 shadow-md"
+              className="w-full py-3 px-4 rounded-2xl spatial-btn-glass text-slate-900 text-xs font-bold flex items-center justify-center gap-2 shadow-xs border border-white"
             >
-              <Upload className="w-4 h-4 text-indigo-400" />
-              <span>OR UPLOAD FULL-SIZE PHOTO</span>
+              <Upload className="w-4 h-4 text-slate-700" />
+              <span>OR UPLOAD PHOTO</span>
             </button>
 
             <button
               onClick={onCancel}
-              className="w-full py-3 px-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white text-xs font-medium"
+              className="w-full py-2.5 px-4 rounded-2xl spatial-pill border border-white/60 text-slate-600 hover:text-slate-900 text-xs font-semibold"
             >
               CANCEL SESSION
             </button>

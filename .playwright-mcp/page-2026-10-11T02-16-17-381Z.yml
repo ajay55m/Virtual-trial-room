@@ -1,0 +1,96 @@
+- generic [ref=e277]:
+  - banner [ref=e317]:
+    - generic [ref=e318]:
+      - 'button "AURA KIOSK #04 AI VIRTUAL FITTING ROOM SYSTEM" [ref=e319]':
+        - generic [ref=e320]: "AURA KIOSK #04"
+        - generic [ref=e321]: AI VIRTUAL FITTING ROOM SYSTEM
+      - generic [ref=e323]: mTLS SECURED
+    - generic [ref=e326]: CATALOG
+    - generic [ref=e328]:
+      - button "Toggle Feedback Sound" [ref=e329]
+      - button "DIAGNOSTICS" [ref=e334]
+      - generic [ref=e339]: 07:46:16 AM
+  - main [ref=e278]:
+    - generic [ref=e513]:
+      - generic [ref=e514]:
+        - generic [ref=e515]:
+          - generic [ref=e516]:
+            - generic [ref=e517]: AURA COUTURE CATALOG
+            - generic [ref=e518]: • 3 Outfits Available
+          - heading "Luxury Wardrobe" [level=2] [ref=e519]
+          - paragraph [ref=e520]: Select any garment to preview instant photorealistic virtual try-on
+        - generic [ref=e521]:
+          - button "All Collections" [ref=e522]
+          - button "Women's Sarees 🥻" [active] [ref=e523]
+          - button "Men's Luxury 👔" [ref=e524]
+          - button "Western Couture ✨" [ref=e525]
+      - generic [ref=e526]:
+        - generic [ref=e527]:
+          - generic [ref=e813] [cursor=pointer]:
+            - generic [ref=e814]:
+              - img "Crimson & Gold Kanjeevaram Silk Saree" [ref=e815]
+              - generic [ref=e816]: Saree Face Fusion
+              - generic [ref=e821]: 99% Fit
+              - generic [ref=e826]: "SKU: AUR-SR-KNJ-01"
+            - generic [ref=e827]:
+              - generic [ref=e828]:
+                - generic [ref=e829]: VASTRALAYAM Heritage
+                - generic [ref=e830]: Women's Saree Collection
+              - heading "Crimson & Gold Kanjeevaram Silk Saree" [level=3] [ref=e831]
+              - generic [ref=e832]:
+                - generic [ref=e833]: $1,650
+                - generic [ref=e834]: Saree
+          - generic [ref=e835] [cursor=pointer]:
+            - generic [ref=e836]:
+              - img "Sapphire Kadwa Banarasi Brocade Saree" [ref=e837]
+              - generic [ref=e838]: Saree Face Fusion
+              - generic [ref=e843]: 97% Fit
+              - generic [ref=e848]: "SKU: AUR-SR-BNR-02"
+            - generic [ref=e849]:
+              - generic [ref=e850]:
+                - generic [ref=e851]: VARANASI Loom Guild
+                - generic [ref=e852]: Women's Saree Collection
+              - heading "Sapphire Kadwa Banarasi Brocade Saree" [level=3] [ref=e853]
+              - generic [ref=e854]:
+                - generic [ref=e855]: $1,380
+                - generic [ref=e856]: Saree
+          - generic [ref=e857] [cursor=pointer]:
+            - generic [ref=e858]:
+              - img "Emerald Sequin Contemporary Georgette Saree" [ref=e859]
+              - generic [ref=e860]: Saree Face Fusion
+              - generic [ref=e865]: 96% Fit
+              - generic [ref=e870]: "SKU: AUR-SR-EMR-03"
+            - generic [ref=e871]:
+              - generic [ref=e872]:
+                - generic [ref=e873]: AURA Haute Couture
+                - generic [ref=e874]: Women's Saree Collection
+              - heading "Emerald Sequin Contemporary Georgette Saree" [level=3] [ref=e875]
+              - generic [ref=e876]:
+                - generic [ref=e877]: $920
+                - generic [ref=e878]: Saree
+        - generic [ref=e711]:
+          - generic [ref=e712]:
+            - generic [ref=e713]:
+              - generic [ref=e714]: VASTRALAYAM Heritage
+              - generic [ref=e715]: Women
+            - heading "Crimson & Gold Kanjeevaram Silk Saree" [level=3] [ref=e716]
+            - generic [ref=e717]: $1,650
+            - generic [ref=e722]:
+              - strong [ref=e723]: "Saree Virtual Model Face-Fusion:"
+              - text: Your face from the captured still will be automatically grafted onto the authentic draped saree virtual model!
+            - paragraph [ref=e724]: Authentic royal crimson Kanjeevaram pure silk saree with opulent 24K gold zari temple motif borders and handwoven ceremonial pallu. Includes tailored raw silk embroidered blouse.
+            - generic [ref=e725]:
+              - generic [ref=e726]:
+                - generic [ref=e727]: Fabric & Craftsmanship
+                - generic [ref=e728]: 100% Pure Mulberry Silk with Gold Zari Weave
+              - generic [ref=e729]:
+                - generic [ref=e730]:
+                  - generic [ref=e731]: Stretch Class
+                  - generic [ref=e732]: None
+                - generic [ref=e733]:
+                  - generic [ref=e734]: Pattern Finish
+                  - generic [ref=e735]: Intricate Temple Border & Rich Pallu
+            - generic [ref=e736]:
+              - generic [ref=e737]: Select Garment Size
+              - button "Free Size (6.3m with Blouse)" [ref=e739]
+          - button "TRY ON THIS SAREE" [ref=e740]

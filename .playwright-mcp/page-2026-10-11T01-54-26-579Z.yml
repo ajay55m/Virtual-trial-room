@@ -1,0 +1,22 @@
+- main [ref=e4]:
+  - generic [ref=e5] [cursor=pointer]:
+    - generic [ref=e8]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: AURA
+        - generic [ref=e16]: HAUTE COUTURE VIRTUAL STUDIO
+      - generic [ref=e17]: EPHEMERAL PRIVACY GUARANTEED
+    - generic [ref=e21]:
+      - generic [ref=e22]: VTON Diffusion Engine 2.0 Ready
+      - heading "Step Into Your Virtual Fitting Studio" [level=1] [ref=e25]
+      - paragraph [ref=e26]: Experience instant photorealistic clothing try-on without changing rooms. Guided AI pose alignment & precision measurement sizing.
+      - button "TOUCH SCREEN TO BEGIN" [ref=e29]
+    - generic [ref=e33]:
+      - generic [ref=e34]:
+        - generic [ref=e35]: Instant Photo Try-On
+        - generic [ref=e36]: No 3D models required from brands
+      - generic [ref=e37]:
+        - generic [ref=e38]: Precision Fit Engine
+        - generic [ref=e39]: Data-backed body measurement match
+      - generic [ref=e40]:
+        - generic [ref=e41]: 100% Data Protection
+        - generic [ref=e42]: Session photos auto-deleted in 15 mins

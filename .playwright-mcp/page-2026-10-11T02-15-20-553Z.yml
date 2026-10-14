@@ -1,0 +1,96 @@
+- generic [ref=e277]:
+  - banner [ref=e317]:
+    - generic [ref=e318]:
+      - 'button "AURA KIOSK #04 AI VIRTUAL FITTING ROOM SYSTEM" [ref=e319]':
+        - generic [ref=e320]: "AURA KIOSK #04"
+        - generic [ref=e321]: AI VIRTUAL FITTING ROOM SYSTEM
+      - generic [ref=e323]: mTLS SECURED
+    - generic [ref=e326]: CATALOG
+    - generic [ref=e328]:
+      - button "Toggle Feedback Sound" [ref=e329]
+      - button "DIAGNOSTICS" [ref=e334]
+      - generic [ref=e339]: 07:45:19 AM
+  - main [ref=e278]:
+    - generic [ref=e513]:
+      - generic [ref=e514]:
+        - generic [ref=e515]:
+          - generic [ref=e516]:
+            - generic [ref=e517]: AURA COUTURE CATALOG
+            - generic [ref=e518]: • 3 Outfits Available
+          - heading "Luxury Wardrobe" [level=2] [ref=e519]
+          - paragraph [ref=e520]: Select any garment to preview instant photorealistic virtual try-on
+        - generic [ref=e521]:
+          - button "All Collections" [ref=e522]
+          - button "Women's Sarees 🥻" [ref=e523]
+          - button "Men's Luxury 👔" [active] [ref=e524]
+          - button "Western Couture ✨" [ref=e525]
+      - generic [ref=e526]:
+        - generic [ref=e527]:
+          - generic [ref=e747] [cursor=pointer]:
+            - generic [ref=e748]:
+              - img "Imperial Ivory Hand-Embroidered Sherwani" [ref=e749]
+              - generic [ref=e750]: Men's Bespoke
+              - generic [ref=e755]: 98% Fit
+              - generic [ref=e760]: "SKU: AUR-MN-SHR-10"
+            - generic [ref=e761]:
+              - generic [ref=e762]:
+                - generic [ref=e763]: ROYAL HERITAGE Atelier
+                - generic [ref=e764]: Men's Luxury Collection
+              - heading "Imperial Ivory Hand-Embroidered Sherwani" [level=3] [ref=e765]
+              - generic [ref=e766]:
+                - generic [ref=e767]: $1,850
+                - generic [ref=e768]: Menswear
+          - generic [ref=e769] [cursor=pointer]:
+            - generic [ref=e770]:
+              - img "Midnight Velvet Shawl-Lapel Tuxedo" [ref=e771]
+              - generic [ref=e772]: Men's Bespoke
+              - generic [ref=e777]: 95% Fit
+              - generic [ref=e782]: "SKU: AUR-MN-TXD-20"
+            - generic [ref=e783]:
+              - generic [ref=e784]:
+                - generic [ref=e785]: SARTORIALE Milano
+                - generic [ref=e786]: Men's Luxury Collection
+              - heading "Midnight Velvet Shawl-Lapel Tuxedo" [level=3] [ref=e787]
+              - generic [ref=e788]:
+                - generic [ref=e789]: $1,450
+                - generic [ref=e790]: Menswear
+          - generic [ref=e791] [cursor=pointer]:
+            - generic [ref=e792]:
+              - img "Charcoal Textured Raw Silk Bandhgala Suit" [ref=e793]
+              - generic [ref=e794]: Men's Bespoke
+              - generic [ref=e799]: 94% Fit
+              - generic [ref=e804]: "SKU: AUR-MN-BDG-30"
+            - generic [ref=e805]:
+              - generic [ref=e806]:
+                - generic [ref=e807]: JODHPUR Imperial Lab
+                - generic [ref=e808]: Men's Luxury Collection
+              - heading "Charcoal Textured Raw Silk Bandhgala Suit" [level=3] [ref=e809]
+              - generic [ref=e810]:
+                - generic [ref=e811]: $1,150
+                - generic [ref=e812]: Menswear
+        - generic [ref=e711]:
+          - generic [ref=e712]:
+            - generic [ref=e713]:
+              - generic [ref=e714]: VASTRALAYAM Heritage
+              - generic [ref=e715]: Women
+            - heading "Crimson & Gold Kanjeevaram Silk Saree" [level=3] [ref=e716]
+            - generic [ref=e717]: $1,650
+            - generic [ref=e722]:
+              - strong [ref=e723]: "Saree Virtual Model Face-Fusion:"
+              - text: Your face from the captured still will be automatically grafted onto the authentic draped saree virtual model!
+            - paragraph [ref=e724]: Authentic royal crimson Kanjeevaram pure silk saree with opulent 24K gold zari temple motif borders and handwoven ceremonial pallu. Includes tailored raw silk embroidered blouse.
+            - generic [ref=e725]:
+              - generic [ref=e726]:
+                - generic [ref=e727]: Fabric & Craftsmanship
+                - generic [ref=e728]: 100% Pure Mulberry Silk with Gold Zari Weave
+              - generic [ref=e729]:
+                - generic [ref=e730]:
+                  - generic [ref=e731]: Stretch Class
+                  - generic [ref=e732]: None
+                - generic [ref=e733]:
+                  - generic [ref=e734]: Pattern Finish
+                  - generic [ref=e735]: Intricate Temple Border & Rich Pallu
+            - generic [ref=e736]:
+              - generic [ref=e737]: Select Garment Size
+              - button "Free Size (6.3m with Blouse)" [ref=e739]
+          - button "TRY ON THIS SAREE" [ref=e740]

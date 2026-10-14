@@ -1,0 +1,48 @@
+- generic [ref=e3]:
+  - banner [ref=e56]:
+    - generic [ref=e57]:
+      - button "VirtualFit STUDIO KIOSK Spatial AI Fitting Room" [ref=e58]:
+        - generic [ref=e63]:
+          - generic [ref=e64]:
+            - generic [ref=e65]: VirtualFit
+            - generic [ref=e66]: STUDIO KIOSK
+          - generic [ref=e67]: Spatial AI Fitting Room
+      - generic [ref=e69]: mTLS ENCRYPTED
+    - generic [ref=e72]: POSITIONING
+    - generic [ref=e74]:
+      - button "Toggle Feedback Sound" [ref=e75]
+      - button "DIAGNOSTICS" [ref=e80]
+      - button "NEW SESSION" [ref=e85]
+      - generic [ref=e92]: 04:45:24 PM
+  - main [ref=e4]:
+    - generic [ref=e143]:
+      - generic [ref=e144]:
+        - generic:
+          - generic: A-POSE ALIGNMENT
+          - generic: Hold pose steady inside outline...
+        - generic [ref=e146]:
+          - button "● Live Laptop Camera" [ref=e147]
+          - button "Mirrored" [ref=e152]
+          - 'button "Demo Model: Male" [ref=e159]'
+          - 'button "Demo Model: Female" [ref=e160]'
+          - button "Upload Custom Photo" [ref=e161]
+      - generic [ref=e166]:
+        - generic [ref=e167]:
+          - generic [ref=e168]: MEDIAPIPE TASKS VISION
+          - heading "Pose Quality Rules" [level=3] [ref=e174]
+          - generic [ref=e175]:
+            - generic [ref=e176]: 33 Landmarks Visible (>0.5)
+            - generic [ref=e181]: Bounding Box Height (84%)
+            - generic [ref=e186]: Horizontal Centering (1% off)
+            - generic [ref=e191]: Shoulder & Hip Yaw (<10°)
+            - generic [ref=e196]: Single Person Check
+            - generic [ref=e201]:
+              - generic [ref=e202]: Laplacian Sharpness
+              - generic [ref=e203]: 480 (PASS)
+          - generic [ref=e205]:
+            - generic [ref=e206]: Stability Gate (1.0s)
+            - generic [ref=e207]: 80%
+        - generic [ref=e210]:
+          - button "CAPTURE STILL NOW" [ref=e211]
+          - button "OR UPLOAD PHOTO" [ref=e216]
+          - button "CANCEL SESSION" [ref=e221]

@@ -10,13 +10,29 @@ export type KioskState =
   | 'RESULT'
   | 'END';
 
+export interface ColorOption {
+  name: string;
+  hex: string;
+  borderHex?: string;
+}
+
+export interface SizeDimension {
+  size: string;
+  dimension: string; // e.g. "38x34 inches"
+  chest?: string;
+  waist?: string;
+}
+
 export interface Garment {
   id: string;
   sku: string;
   name: string;
   brand: string;
-  category: 'Upper' | 'Lower' | 'Dress' | 'Outerwear';
+  category: 'Upper' | 'Lower' | 'Dress' | 'Outerwear' | 'Saree' | 'Menswear' | 'Head' | 'Foot' | 'Pants' | 'Top Body' | 'Full body';
+  collection?: string;
+  gender?: 'Women' | 'Men' | 'Unisex';
   price: string;
+  priceNumber?: number;
   fabricComposition: string;
   stretchClass: 'None' | 'Low' | 'Medium' | 'High';
   patternType: string;
@@ -24,7 +40,11 @@ export interface Garment {
   suitabilityScore: number; // 0-100
   flatlayImage: string;
   tryonResultImage: string;
+  virtualModelImage?: string;
+  isSaree?: boolean;
   availableSizes: string[];
+  sizeChart?: SizeDimension[];
+  colors?: ColorOption[];
   description: string;
 }
 
@@ -61,3 +81,4 @@ export interface TelemetryLog {
   component: 'EdgeVision' | 'GatewayAPI' | 'CeleryQueue' | 'VTONWorker' | 'SecurityAudit';
   message: string;
 }
+

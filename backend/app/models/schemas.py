@@ -10,7 +10,9 @@ class GarmentBase(BaseModel):
     sku: str
     name: str
     brand: str
-    category: Literal['Upper', 'Lower', 'Dress', 'Outerwear']
+    category: Literal['Upper', 'Lower', 'Dress', 'Outerwear', 'Saree', 'Menswear']
+    collection: Optional[str] = None
+    gender: Optional[str] = None
     price: str
     fabricComposition: str
     stretchClass: Literal['None', 'Low', 'Medium', 'High']
@@ -19,6 +21,8 @@ class GarmentBase(BaseModel):
     suitabilityScore: int = Field(default=95, ge=0, le=100)
     flatlayImage: str
     tryonResultImage: str
+    virtualModelImage: Optional[str] = None
+    isSaree: Optional[bool] = False
     availableSizes: List[str]
     description: str
 
