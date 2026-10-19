@@ -49,41 +49,37 @@ The **AURA Virtual Fitting Room Kiosk System** is an in-store hardware-software 
 ## 📂 Project Structure
 
 ```
-virtual-room/
-├── public/
-│   └── assets/                  # Generated demo photos & try-on renders
-│       ├── demo_person.jpg      # Base A-pose studio photo
-│       ├── garment_blazer.jpg   # Tailored Silk Blazer flatlay
-│       ├── tryon_blazer.jpg     # Photorealistic VTON result
-│       ├── garment_dress.jpg    # Emerald Evening Gown flatlay
-│       ├── tryon_dress.jpg      # Photorealistic VTON result
-│       ├── garment_jacket.jpg   # Cybernetic Techwear Jacket flatlay
-│       └── tryon_jacket.jpg     # Photorealistic VTON result
-├── src/
-│   ├── components/              # Interactive UI Kiosk Modules
-│   │   ├── Header.tsx           # Kiosk status bar, time & audio controls
-│   │   ├── IdleScreen.tsx       # Ambient touch-to-start standby view
-│   │   ├── ConsentModal.tsx     # BIPA/GDPR privacy agreement modal
-│   │   ├── PositioningCamera.tsx# MediaPipe pose guidance & webcam/demo capture
-│   │   ├── ReviewScreen.tsx     # Capture EXIF verification & quality checks
-│   │   ├── CatalogView.tsx      # Garment catalog browsing & size selection
-│   │   ├── GeneratingPipeline.tsx# VTON progress pass & WS log inspector
-│   │   ├── ResultView.tsx       # VTON render toggle, sizing card & QR export
-│   │   └── AdminModal.tsx       # Kiosk telemetry & data purge audit
-│   ├── data/
-│   │   └── mockGarments.ts      # Luxury clothing catalog dataset
-│   ├── types/
-│   │   └── kiosk.ts             # Domain TypeScript interfaces
-│   ├── utils/
-│   │   └── audio.ts             # Web Audio feedback synthesizer
-│   ├── App.tsx                  # Kiosk State Machine Router
-│   ├── main.tsx                 # React Root entrypoint
-│   └── index.css                # Custom glassmorphism styles & animations
-├── Virtual Fitting Room Kiosk System Design Document.docx
-├── system_design_analysis.md    # Complete Architecture Analysis Report
-├── package.json
-├── tsconfig.json
-└── vite.config.ts
+Virtual-trial-room/
+├── frontend/                    # Interactive Kiosk Frontend (React 19 + TypeScript + Vite)
+│   ├── public/
+│   │   ├── models/              # Local MediaPipe task models (pose_landmarker_lite.task)
+│   │   ├── wasm/                # MediaPipe WebAssembly binaries
+│   │   └── assets/              # Garment catalog assets & test images
+│   ├── src/
+│   │   ├── components/          # Kiosk UI Components
+│   │   │   ├── Header.tsx           # Kiosk header & state bar
+│   │   │   ├── IdleScreen.tsx       # Touch-to-enter standby view
+│   │   │   ├── ConsentModal.tsx     # Biometric privacy consent modal
+│   │   │   ├── PositioningCamera.tsx# Live MediaPipe Pose Gate & guidance HUD
+│   │   │   ├── ReviewScreen.tsx     # Capture inspection & upload replacement
+│   │   │   ├── CatalogView.tsx      # Garment catalog browsing & selection
+│   │   │   ├── GeneratingPipeline.tsx# Try-on progress screen
+│   │   │   └── ResultView.tsx       # Dual-mode try-on inspection view
+│   │   ├── services/
+│   │   │   ├── api.ts               # Backend HTTP/WS API client
+│   │   │   └── poseLandmarker.ts    # MediaPipe Tasks Vision Pose Landmarker service
+│   │   ├── types/kiosk.ts           # TypeScript domain definitions
+│   │   └── App.tsx                  # Kiosk State Router
+│   ├── package.json
+│   └── vite.config.ts
+├── backend/                     # Retail API Gateway (FastAPI + Python 3.11+)
+│   ├── app/
+│   │   ├── api/v1/endpoints/    # REST endpoints (catalog, sessions, tryon)
+│   │   └── services/            # Try-on synthesis, SAM segmenter, sizing engine
+│   └── requirements.txt
+├── launch_kiosk.bat             # Enterprise Kiosk Launcher (Chrome App Window)
+├── AUDIT.md                     # Comprehensive Codebase & Architecture Audit
+└── README.md
 ```
 
 ---
@@ -92,31 +88,42 @@ virtual-room/
 
 ### Prerequisites
 * **Node.js**: v18.0.0 or higher
-* **NPM**: v9.0.0 or higher
+* **Python**: v3.10+ (for backend)
 
-### Installation
+### Running the Frontend
 
-1. **Clone the Repository:**
-   ```bash
-   git clone https://github.com/ajay55m/Virtual-trial-room.git
-   cd Virtual-trial-room
-   ```
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Open `http://localhost:5173/` in your browser.
 
-2. **Install Dependencies:**
-   ```bash
-   npm install
-   ```
+### Running the Backend
 
-3. **Start Development Server:**
-   ```bash
-   npm run dev
-   ```
-   Open `http://localhost:5173/` in your browser.
+```bash
+cd backend
+pip install -r requirements.txt
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
 
-4. **Build Production Bundle:**
-   ```bash
-   npm run build
-   ```
+### Full Kiosk Launcher
+
+Double-click or run `.\launch_kiosk.bat` from PowerShell/CMD in the repository root.
+
+---
+
+## 🛡️ Capture Gate (Phase 1 Implemented)
+
+The live camera feed evaluates every frame using `@mediapipe/tasks-vision` (`pose_landmarker_lite.task` running on GPU Wasm):
+- **Tops Requirement:** Shoulders (11, 12) and hips (23, 24) must have visibility > 0.5.
+- **Full Outfits / Sarees Requirement:** Ankles (27, 28) also required with visibility > 0.5.
+- **Single Person Gate:** Multiple detected persons immediately reject the frame with `"Only one person"`.
+- **Torso Occlusion Check:** Detects wrists and hand keypoints (15–22) inside the torso region to prevent selfies holding phones over the chest (`"Lower your phone"`).
+- **Framing Gate:** Requires shopper to fill at least 60% of frame height (`"Step closer to camera"` or `"Step back"`).
+- **1.0s Stability Hold:** The shopper must hold the valid pose continuously for at least 1.0 second before capture can be triggered.
+- **Enforced Capture Button:** The capture button remains strictly disabled until all criteria pass continuously for 1.0 second.
+- **Automated Verification Suite:** Run `npx tsx scripts/test_pose_gate.ts` inside `frontend/` to execute the automated gate verification suite (covering head-and-shoulders, hand-on-chest phone occlusion, multi-person presence, framing height, ankle visibility, and valid pose).
 
 ---
 

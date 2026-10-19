@@ -2,21 +2,26 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Camera, 
   CheckCircle2, 
-  Sparkles, 
   Video, 
   UserCheck, 
   RefreshCw, 
   AlertCircle, 
   Settings2, 
   Upload, 
-  ArrowRight 
+  ArrowRight,
+  ShieldAlert,
+  XCircle,
+  Loader2
 } from 'lucide-react';
 import type { PoseQualityMetrics } from '../types/kiosk';
 import { kioskAudio } from '../utils/audio';
+import { poseLandmarkerService, type PoseGateEvaluation } from '../services/poseLandmarker';
+import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
 
 interface PositioningCameraProps {
   onCaptured: (photoUri: string, metrics: PoseQualityMetrics) => void;
   onCancel: () => void;
+  category?: string;
 }
 
 interface VideoDevice {
@@ -24,7 +29,113 @@ interface VideoDevice {
   label: string;
 }
 
-export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured, onCancel }) => {
+function drawPoseSkeleton(
+  ctx: CanvasRenderingContext2D,
+  landmarks: NormalizedLandmark[],
+  width: number,
+  height: number,
+  isMirrored: boolean,
+  gatePassed: boolean,
+  torsoRect?: { minX: number; maxX: number; minY: number; maxY: number }
+) {
+  ctx.save();
+  ctx.clearRect(0, 0, width, height);
+
+  const getCanvasCoord = (lm: NormalizedLandmark) => {
+    const x = isMirrored ? (1 - lm.x) * width : lm.x * width;
+    const y = lm.y * height;
+    return { x, y, vis: lm.visibility !== undefined ? lm.visibility : 1.0 };
+  };
+
+  // Draw torso box if provided
+  if (torsoRect) {
+    const minX = isMirrored ? (1 - torsoRect.maxX) * width : torsoRect.minX * width;
+    const maxX = isMirrored ? (1 - torsoRect.minX) * width : torsoRect.maxX * width;
+    const minY = torsoRect.minY * height;
+    const maxY = torsoRect.maxY * height;
+    const boxW = maxX - minX;
+    const boxH = maxY - minY;
+
+    ctx.strokeStyle = gatePassed ? 'rgba(16, 185, 129, 0.85)' : 'rgba(239, 68, 68, 0.85)';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash(gatePassed ? [] : [6, 6]);
+    ctx.strokeRect(minX, minY, boxW, boxH);
+    ctx.fillStyle = gatePassed ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.12)';
+    ctx.fillRect(minX, minY, boxW, boxH);
+    ctx.setLineDash([]);
+  }
+
+  // Skeletal Connections
+  const connections = [
+    [11, 12], // shoulders
+    [11, 23], [12, 24], // torso sides
+    [23, 24], // hips
+    [11, 13], [13, 15], // left arm
+    [12, 14], [14, 16], // right arm
+    [23, 25], [25, 27], // left leg
+    [24, 26], [26, 28], // right leg
+  ];
+
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+
+  for (const [i1, i2] of connections) {
+    const p1 = landmarks[i1];
+    const p2 = landmarks[i2];
+    if (!p1 || !p2) continue;
+    const c1 = getCanvasCoord(p1);
+    const c2 = getCanvasCoord(p2);
+    if (c1.vis < 0.3 || c2.vis < 0.3) continue;
+
+    ctx.strokeStyle = gatePassed ? '#10b981' : '#f59e0b';
+    ctx.beginPath();
+    ctx.moveTo(c1.x, c1.y);
+    ctx.lineTo(c2.x, c2.y);
+    ctx.stroke();
+  }
+
+  // Draw Landmark Keypoints
+  for (let i = 0; i < landmarks.length; i++) {
+    const pt = landmarks[i];
+    if (!pt) continue;
+    const c = getCanvasCoord(pt);
+    if (c.vis < 0.3) continue;
+
+    const isTorsoKeypoint = i === 11 || i === 12 || i === 23 || i === 24;
+    const isHandKeypoint = i >= 15 && i <= 22;
+    const isAnkleKeypoint = i === 27 || i === 28;
+
+    let radius = 4;
+    let fill = gatePassed ? '#10b981' : '#6366f1';
+
+    if (isTorsoKeypoint) {
+      radius = 7;
+      fill = c.vis >= 0.5 ? '#10b981' : '#ef4444';
+    } else if (isHandKeypoint) {
+      radius = 5.5;
+      fill = '#f59e0b';
+    } else if (isAnkleKeypoint) {
+      radius = 6;
+      fill = c.vis >= 0.5 ? '#10b981' : '#ef4444';
+    }
+
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+export const PositioningCamera: React.FC<PositioningCameraProps> = ({ 
+  onCaptured, 
+  onCancel,
+  category = 'Upper'
+}) => {
   const [activeMode, setActiveMode] = useState<'camera' | 'upload' | 'demo'>('camera');
   const [uploadedPreview, setUploadedPreview] = useState<string | null>(null);
   const [useWebcam, setUseWebcam] = useState(true);
@@ -36,21 +147,17 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
   const [countdown, setCountdown] = useState<number | null>(null);
   const [stabilityTime, setStabilityTime] = useState(0);
   const [streamActive, setStreamActive] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>(category);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isLoadingVision, setIsLoadingVision] = useState(true);
+  const [gateResult, setGateResult] = useState<PoseGateEvaluation | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const metrics: PoseQualityMetrics = {
-    sharpnessVariance: useWebcam ? 480 : 420,
-    bodyHeightPercent: 84,
-    horizontalCenterOffset: 1,
-    shoulderYawDegrees: 2,
-    personCount: 1,
-    aPoseCompliant: true,
-    stabilityTimeSec: stabilityTime
-  };
+  const passedStartTimeRef = useRef<number | null>(null);
 
   const getCameraDevices = async () => {
     try {
@@ -105,7 +212,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
       console.warn('Webcam access error:', err);
       setCameraError(
         err.name === 'NotAllowedError'
-          ? 'Camera access denied by browser. Please grant permission or use Demo Mode.'
+          ? 'Camera access denied by browser. Please grant permission or use Upload Photo.'
           : 'Unable to start camera stream. Falling back to Demo Mode.'
       );
       setUseWebcam(false);
@@ -132,29 +239,95 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
     };
   }, [useWebcam, selectedDeviceId]);
 
-  const [isDragging, setIsDragging] = useState(false);
-
+  // Initialize MediaPipe PoseLandmarker and run continuous per-frame gate evaluation loop
   useEffect(() => {
-    if (activeMode !== 'camera' || !useWebcam || !streamActive) {
-      setStabilityTime(0);
-      setCountdown(null);
-      return;
-    }
+    let animationFrameId: number;
+    let isMounted = true;
 
-    const interval = setInterval(() => {
-      setStabilityTime((prev) => {
-        if (prev >= 1.0) {
-          if (countdown === null) {
-            startCountdown();
-          }
-          return 1.0;
-        }
-        return Math.min(1.0, prev + 0.2);
+    setIsLoadingVision(true);
+    poseLandmarkerService.init()
+      .then(() => {
+        if (isMounted) setIsLoadingVision(false);
+      })
+      .catch((err) => {
+        console.warn('[PositioningCamera] MediaPipe init fallback:', err);
+        if (isMounted) setIsLoadingVision(false);
       });
-    }, 250);
 
-    return () => clearInterval(interval);
-  }, [countdown, activeMode, useWebcam, streamActive]);
+    const runVisionLoop = () => {
+      if (
+        activeMode === 'camera' &&
+        useWebcam &&
+        streamActive &&
+        videoRef.current &&
+        videoRef.current.readyState >= 2 &&
+        !videoRef.current.paused
+      ) {
+        const video = videoRef.current;
+        const evaluation = poseLandmarkerService.evaluateVideoFrame(
+          video,
+          selectedCategory,
+          stabilityTime
+        );
+
+        if (evaluation) {
+          setGateResult(evaluation);
+
+          // Render landmark skeleton & torso bounds on overlay canvas
+          if (overlayCanvasRef.current) {
+            const canvas = overlayCanvasRef.current;
+            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+              canvas.width = video.videoWidth || 1280;
+              canvas.height = video.videoHeight || 720;
+            }
+            const ctx = canvas.getContext('2d');
+            if (ctx && evaluation.landmarks) {
+              drawPoseSkeleton(
+                ctx,
+                evaluation.landmarks,
+                canvas.width,
+                canvas.height,
+                isMirrored,
+                evaluation.passed,
+                evaluation.torsoRect
+              );
+            } else if (ctx) {
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+          }
+
+          // Real stability tracking: only increments when all gate criteria pass continuously for 1.0s!
+          if (evaluation.passed) {
+            if (passedStartTimeRef.current === null) {
+              passedStartTimeRef.current = performance.now();
+            }
+            const elapsedSec = (performance.now() - passedStartTimeRef.current) / 1000.0;
+            const progress = Math.min(1.0, elapsedSec / 1.0);
+            setStabilityTime(progress);
+            if (progress >= 1.0 && countdown === null) {
+              startCountdown();
+            }
+          } else {
+            // Cancel countdown and reset stability immediately if user moves away or breaks gate
+            passedStartTimeRef.current = null;
+            setStabilityTime(0);
+            if (countdown !== null) {
+              setCountdown(null);
+            }
+          }
+        }
+      }
+
+      animationFrameId = requestAnimationFrame(runVisionLoop);
+    };
+
+    animationFrameId = requestAnimationFrame(runVisionLoop);
+
+    return () => {
+      isMounted = false;
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [activeMode, useWebcam, streamActive, selectedCategory, isMirrored, countdown, stabilityTime]);
 
   const startCountdown = () => {
     kioskAudio.playBeep(800, 0.1);
@@ -276,16 +449,40 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
 
   const demoImageUri = demoModel === 'female' ? '/assets/demo_person.jpg' : '/assets/virtualfit_model_tshirt.jpg';
 
+  const defaultCameraMetrics: PoseQualityMetrics = gateResult?.metrics || {
+    sharpnessVariance: 480,
+    bodyHeightPercent: 84,
+    horizontalCenterOffset: 1,
+    shoulderYawDegrees: 2,
+    personCount: 1,
+    aPoseCompliant: true,
+    stabilityTimeSec: stabilityTime
+  };
+
+  // Check whether capture is allowed by the gate
+  const canCapture = activeMode === 'upload' 
+    ? uploadedPreview !== null 
+    : activeMode === 'demo' 
+    ? true 
+    : (gateResult?.passed === true && stabilityTime >= 1.0);
+
   const triggerCapture = () => {
+    if (!canCapture) return;
+
     if (activeMode === 'upload' && uploadedPreview) {
-      onCaptured(uploadedPreview, metrics);
+      onCaptured(uploadedPreview, defaultCameraMetrics);
       return;
     }
     const targetImage = (activeMode === 'camera' && useWebcam && streamActive)
       ? captureVideoFrame()
       : demoImageUri;
-    onCaptured(targetImage, metrics);
+    onCaptured(targetImage, defaultCameraMetrics);
   };
+
+  const isFullOutfit =
+    selectedCategory.toLowerCase().includes('saree') ||
+    selectedCategory.toLowerCase().includes('dress') ||
+    selectedCategory.toLowerCase().includes('full');
 
   return (
     <div className="relative w-full h-full min-h-[calc(100vh-5rem)] flex flex-col p-6 select-none overflow-y-auto">
@@ -305,7 +502,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className="lg:col-span-3 spatial-glass rounded-[2.5rem] overflow-hidden relative border border-white/80 flex items-center justify-center min-h-[60vh] shadow-2xl"
+          className="lg:col-span-3 spatial-glass rounded-[2.5rem] overflow-hidden relative border border-white/80 flex items-center justify-center min-h-[60vh] shadow-2xl bg-slate-900/10"
         >
           
           {/* MODE 1: UPLOAD PERSON PHOTO */}
@@ -322,7 +519,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
                   </div>
                   <div className="flex flex-col gap-2.5 w-full">
                     <button
-                      onClick={() => onCaptured(uploadedPreview, metrics)}
+                      onClick={() => onCaptured(uploadedPreview, defaultCameraMetrics)}
                       className="w-full py-3.5 px-6 rounded-2xl spatial-btn-primary text-white font-bold flex items-center justify-center gap-2 shadow-xl hover:brightness-110 active:scale-98"
                     >
                       <span>USE THIS PHOTO & TRY ON CLOTHES</span>
@@ -392,17 +589,24 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
             </div>
           )}
 
-          {/* MODE 2: LIVE CAMERA FEED */}
+          {/* MODE 2: LIVE CAMERA FEED WITH MEDIAPIPE SKELETON */}
           {activeMode === 'camera' && (
-            <>
+            <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
               {useWebcam ? (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className={`w-full h-full object-cover ${isMirrored ? 'transform -scale-x-100' : ''}`}
-                />
+                <>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className={`w-full h-full object-cover ${isMirrored ? 'transform -scale-x-100' : ''}`}
+                  />
+                  {/* Real-time MediaPipe Landmark Canvas Overlay */}
+                  <canvas
+                    ref={overlayCanvasRef}
+                    className="absolute inset-0 w-full h-full object-cover pointer-events-none z-10"
+                  />
+                </>
               ) : (
                 <img
                   src={demoImageUri}
@@ -411,48 +615,52 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
                 />
               )}
 
-              {/* Silhouette Overlay & Skeleton HUD */}
-              <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-                {/* Corner Bracket HUD */}
-                <div className="absolute top-6 left-6 w-12 h-12 border-t-2 border-l-2 border-slate-800/80 rounded-tl-2xl" />
-                <div className="absolute top-6 right-6 w-12 h-12 border-t-2 border-r-2 border-slate-800/80 rounded-tr-2xl" />
-                <div className="absolute bottom-6 left-6 w-12 h-12 border-b-2 border-l-2 border-slate-800/80 rounded-bl-2xl" />
-                <div className="absolute bottom-6 right-6 w-12 h-12 border-b-2 border-r-2 border-slate-800/80 rounded-br-2xl" />
+              {/* Real-Time Live Guidance Banner */}
+              <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center pointer-events-none max-w-[90%]">
+                {isLoadingVision ? (
+                  <div className="spatial-glass px-5 py-2.5 rounded-full border border-white/90 shadow-xl flex items-center gap-2.5">
+                    <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                    <span className="text-xs font-bold text-slate-800">Loading MediaPipe Pose Landmarker...</span>
+                  </div>
+                ) : gateResult ? (
+                  <div className={`px-6 py-3 rounded-full border backdrop-blur-md shadow-2xl flex items-center gap-3 transition-all duration-300 ${
+                    gateResult.passed 
+                      ? 'bg-emerald-500/90 border-emerald-300 text-white scale-105' 
+                      : 'bg-slate-900/85 border-amber-400/80 text-white'
+                  }`}>
+                    {gateResult.passed ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0 animate-bounce" />
+                    ) : (
+                      <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
+                    )}
+                    <div className="text-left">
+                      <div className="text-sm font-extrabold tracking-wide uppercase">
+                        {gateResult.guidance}
+                      </div>
+                      {gateResult.subGuidance && (
+                        <div className="text-[11px] opacity-90 font-medium">
+                          {gateResult.subGuidance}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
 
-                {/* Silhouette Outline Guide */}
-                <div
-                  className={`w-72 h-[75%] border-2 rounded-full flex flex-col items-center justify-between p-6 transition-all duration-500 ${
-                    stabilityTime >= 1.0 ? 'border-emerald-600/90 bg-emerald-500/15' : 'border-slate-800/60 bg-white/10'
-                  }`}
+              {/* Bottom Quick Controls & Floating Prompt */}
+              <div className="absolute bottom-6 flex flex-wrap items-center justify-center gap-3 px-4 z-20">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveMode('upload');
+                    setUseWebcam(false);
+                    openFilePicker();
+                  }}
+                  className="spatial-glass pointer-events-auto px-4 py-2.5 rounded-full border border-white/90 flex items-center gap-2 shadow-xl text-xs font-bold text-indigo-800 bg-white/80 hover:bg-white hover:scale-105 active:scale-95 transition-all"
                 >
-                  <div className="w-16 h-16 rounded-full border border-slate-700/50 mt-4" />
-                  <div className="w-full border-t border-slate-700/40 my-auto" />
-                  <div className="text-[10px] font-mono font-bold text-slate-800 spatial-pill px-3 py-1 border border-white/80 shadow-xs">
-                    A-POSE ALIGNMENT
-                  </div>
-                </div>
-
-                {/* Active Floating Prompt & Direct Upload Shortcut */}
-                <div className="absolute bottom-8 flex flex-wrap items-center justify-center gap-3 px-4 z-20">
-                  <div className="spatial-glass px-6 py-3 rounded-full border border-white/90 flex items-center gap-3 shadow-xl">
-                    <Sparkles className="w-5 h-5 text-indigo-700 animate-spin" style={{ animationDuration: '4s' }} />
-                    <span className="text-sm font-bold text-slate-900 tracking-wide">
-                      {stabilityTime < 1.0 ? 'Hold pose steady inside outline...' : 'Pose locked! Keep still...'}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveMode('upload');
-                      setUseWebcam(false);
-                      openFilePicker();
-                    }}
-                    className="spatial-glass pointer-events-auto px-4 py-3 rounded-full border border-white/90 flex items-center gap-2 shadow-xl text-xs font-bold text-indigo-800 bg-white/80 hover:bg-white hover:scale-105 active:scale-95 transition-all"
-                  >
-                    <Upload className="w-4 h-4 text-indigo-600" />
-                    <span>Upload From Device</span>
-                  </button>
-                </div>
+                  <Upload className="w-4 h-4 text-indigo-600" />
+                  <span>Upload From Device Instead</span>
+                </button>
               </div>
 
               {/* Countdown Overlay */}
@@ -464,7 +672,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
                   <div className="text-xl font-extrabold text-slate-800 tracking-widest mt-6">CAPTURING FRAME</div>
                 </div>
               )}
-            </>
+            </div>
           )}
 
           {/* MODE 3: DEMO MODELS */}
@@ -558,28 +766,52 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
               </>
             )}
 
+            {/* Outfit Gating Mode Toggle */}
+            <div className="flex items-center gap-1 spatial-pill p-1 rounded-full border border-white/70 shadow-xs">
+              <button
+                onClick={() => setSelectedCategory('Upper')}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all ${
+                  !isFullOutfit
+                    ? 'spatial-pill-active border border-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Tops Gate (Torso)
+              </button>
+              <button
+                onClick={() => setSelectedCategory('Full body')}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all ${
+                  isFullOutfit
+                    ? 'spatial-pill-active border border-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Full Outfit (Ankles)
+              </button>
+            </div>
+
             {/* Sub-controls for Demo mode */}
             {activeMode === 'demo' && (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 spatial-pill p-1 rounded-full border border-white/70 shadow-xs">
                 <button
                   onClick={() => setDemoModel('male')}
-                  className={`px-3 py-1.5 rounded-full border text-xs font-bold transition-all ${
+                  className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all ${
                     demoModel === 'male'
-                      ? 'spatial-pill-active border-white text-slate-900 shadow-xs'
-                      : 'spatial-pill border-white/70 text-slate-700 hover:text-slate-900'
+                      ? 'spatial-pill-active border border-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Male
+                  Male Model
                 </button>
                 <button
                   onClick={() => setDemoModel('female')}
-                  className={`px-3 py-1.5 rounded-full border text-xs font-bold transition-all ${
+                  className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all ${
                     demoModel === 'female'
-                      ? 'spatial-pill-active border-white text-slate-900 shadow-xs'
-                      : 'spatial-pill border-white/70 text-slate-700 hover:text-slate-900'
+                      ? 'spatial-pill-active border border-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Female
+                  Female Model
                 </button>
               </div>
             )}
@@ -594,57 +826,149 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
           )}
         </div>
 
-        {/* Right Col: MediaPipe Rule Quality Inspector */}
+        {/* Right Col: MediaPipe Real Capture Gate Inspector */}
         <div className="spatial-glass rounded-[2.5rem] p-6 border border-white/80 shadow-2xl flex flex-col justify-between">
           <div>
-            <div className="flex items-center gap-2 text-indigo-700 font-mono text-xs font-bold tracking-wider mb-2">
-              <UserCheck className="w-4 h-4" />
-              <span>MEDIAPIPE TASKS VISION</span>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 text-indigo-700 font-mono text-xs font-bold tracking-wider">
+                <UserCheck className="w-4 h-4" />
+                <span>MEDIAPIPE POSE GATE</span>
+              </div>
+              <div className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase ${
+                canCapture ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+              }`}>
+                {canCapture ? 'GATE PASS' : 'GATE LOCKED'}
+              </div>
             </div>
-            <h3 className="text-xl font-extrabold text-slate-900 mb-6">Pose Quality Rules</h3>
 
-            {/* Validation Checklist */}
+            <h3 className="text-xl font-extrabold text-slate-900 mb-4">Pose Validation Rules</h3>
+
+            {/* Live MediaPipe Rules Status */}
             <div className="space-y-2.5 text-xs">
+              {/* Rule 1: Single Person */}
               <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
-                <span className="text-slate-700 font-medium">33 Landmarks Visible (&gt;0.5)</span>
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span className="text-slate-700 font-medium">Single Person in Frame</span>
+                {gateResult ? (
+                  gateResult.allPosesCount === 1 ? (
+                    <span className="flex items-center gap-1 font-bold text-emerald-700">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>1 Person</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 font-bold text-red-600">
+                      <XCircle className="w-4 h-4 text-red-500" />
+                      <span>{gateResult.allPosesCount} Persons</span>
+                    </span>
+                  )
+                ) : (
+                  <span className="text-slate-400">Waiting...</span>
+                )}
               </div>
 
+              {/* Rule 2: Shoulders (11, 12) */}
               <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
-                <span className="text-slate-700 font-medium">Bounding Box Height (84%)</span>
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span className="text-slate-700 font-medium">Shoulders Visible (11, 12 &gt;0.5)</span>
+                {gateResult ? (
+                  !gateResult.reasons.includes('SHOULDERS_NOT_VISIBLE') && gateResult.allPosesCount > 0 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <span className="flex items-center gap-1 font-bold text-red-600">
+                      <XCircle className="w-4 h-4 text-red-500" />
+                      <span>Missing</span>
+                    </span>
+                  )
+                ) : (
+                  <span className="text-slate-400">Waiting...</span>
+                )}
               </div>
 
+              {/* Rule 3: Hips / Torso (23, 24) */}
               <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
-                <span className="text-slate-700 font-medium">Horizontal Centering (1% off)</span>
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span className="text-slate-700 font-medium">Torso &amp; Hips Visible (23, 24 &gt;0.5)</span>
+                {gateResult ? (
+                  !gateResult.reasons.includes('TORSO_HIPS_NOT_VISIBLE') && gateResult.allPosesCount > 0 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <span className="flex items-center gap-1 font-bold text-red-600">
+                      <XCircle className="w-4 h-4 text-red-500" />
+                      <span>Missing</span>
+                    </span>
+                  )
+                ) : (
+                  <span className="text-slate-400">Waiting...</span>
+                )}
               </div>
 
+              {/* Rule 4: Ankles (27, 28) for full outfit */}
+              {isFullOutfit && (
+                <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
+                  <span className="text-slate-700 font-medium">Ankles Visible (27, 28 &gt;0.5)</span>
+                  {gateResult ? (
+                    !gateResult.reasons.includes('ANKLES_NOT_VISIBLE') && gateResult.allPosesCount > 0 ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <span className="flex items-center gap-1 font-bold text-red-600">
+                        <XCircle className="w-4 h-4 text-red-500" />
+                        <span>Missing</span>
+                      </span>
+                    )
+                  ) : (
+                    <span className="text-slate-400">Waiting...</span>
+                  )}
+                </div>
+              )}
+
+              {/* Rule 5: Framing Height (>= 60%) */}
               <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
-                <span className="text-slate-700 font-medium">Shoulder &amp; Hip Yaw (&lt;10°)</span>
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span className="text-slate-700 font-medium">Person Height (&ge; 60%)</span>
+                {gateResult ? (
+                  gateResult.metrics.bodyHeightPercent >= 60 ? (
+                    <span className="flex items-center gap-1 font-bold text-emerald-700 font-mono">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>{gateResult.metrics.bodyHeightPercent}%</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 font-bold text-amber-700 font-mono">
+                      <XCircle className="w-4 h-4 text-amber-500" />
+                      <span>{gateResult.metrics.bodyHeightPercent}%</span>
+                    </span>
+                  )
+                ) : (
+                  <span className="text-slate-400">Waiting...</span>
+                )}
               </div>
 
+              {/* Rule 6: Hands Away from Torso */}
               <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
-                <span className="text-slate-700 font-medium">Single Person Check</span>
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              </div>
-
-              <div className="p-3 rounded-2xl spatial-card border border-white/70 flex items-center justify-between shadow-xs">
-                <span className="text-slate-700 font-medium">Laplacian Sharpness</span>
-                <span className="font-mono font-bold text-slate-900">{useWebcam ? '480 (PASS)' : '420 (PASS)'}</span>
+                <span className="text-slate-700 font-medium">Torso Clear (No Hand / Phone)</span>
+                {gateResult ? (
+                  !gateResult.reasons.includes('HAND_COVERING_TORSO') ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <span className="flex items-center gap-1 font-bold text-red-600">
+                      <XCircle className="w-4 h-4 text-red-500" />
+                      <span>Covered</span>
+                    </span>
+                  )
+                ) : (
+                  <span className="text-slate-400">Waiting...</span>
+                )}
               </div>
             </div>
 
             {/* Stability Progress Bar */}
             <div className="mt-6">
               <div className="flex justify-between text-xs font-bold mb-2">
-                <span className="text-slate-700">Stability Gate (1.0s)</span>
+                <span className="text-slate-700">Hold Pose Steady (1.0s)</span>
                 <span className="text-indigo-800 font-mono">{Math.round(stabilityTime * 100)}%</span>
               </div>
               <div className="h-3 w-full bg-white/40 rounded-full overflow-hidden p-0.5 border border-white/70 shadow-inner">
                 <div
-                  className="h-full bg-gradient-to-r from-indigo-600 to-emerald-500 rounded-full transition-all duration-200"
+                  className={`h-full rounded-full transition-all duration-200 ${
+                    canCapture 
+                      ? 'bg-gradient-to-r from-indigo-600 to-emerald-500' 
+                      : 'bg-slate-300'
+                  }`}
                   style={{ width: `${stabilityTime * 100}%` }}
                 />
               </div>
@@ -655,7 +979,12 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
           <div className="space-y-2.5 mt-6">
             <button
               onClick={triggerCapture}
-              className="w-full py-4 px-6 rounded-2xl spatial-btn-primary text-white font-bold tracking-wider flex items-center justify-center gap-3 shadow-xl active:scale-98"
+              disabled={!canCapture}
+              className={`w-full py-4 px-6 rounded-2xl font-bold tracking-wider flex items-center justify-center gap-3 shadow-xl transition-all ${
+                canCapture
+                  ? 'spatial-btn-primary text-white active:scale-98 cursor-pointer'
+                  : 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60 border border-slate-300 shadow-none'
+              }`}
             >
               {activeMode === 'upload' ? (
                 <>
@@ -670,17 +999,23 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
               ) : (
                 <>
                   <Camera className="w-5 h-5" />
-                  <span>CAPTURE STILL NOW</span>
+                  <span>
+                    {canCapture
+                      ? 'CAPTURE STILL NOW'
+                      : gateResult?.passed
+                      ? `HOLD POSE STEADY (${Math.round(stabilityTime * 100)}%)`
+                      : (gateResult?.guidance || 'ALIGN BODY TO CAPTURE')}
+                  </span>
                 </>
               )}
             </button>
 
             <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full py-3 px-4 rounded-2xl spatial-btn-glass text-slate-900 text-xs font-bold flex items-center justify-center gap-2 shadow-xs border border-white"
+              onClick={openFilePicker}
+              className="w-full py-3 px-4 rounded-2xl spatial-btn-glass text-slate-900 text-xs font-bold flex items-center justify-center gap-2 shadow-xs border border-white hover:bg-white"
             >
               <Upload className="w-4 h-4 text-slate-700" />
-              <span>OR UPLOAD PHOTO</span>
+              <span>OR UPLOAD PHOTO FROM DEVICE</span>
             </button>
 
             <button

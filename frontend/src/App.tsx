@@ -144,6 +144,7 @@ export function App() {
           <PositioningCamera
             onCaptured={handlePhotoCaptured}
             onCancel={handleResetSession}
+            category={selectedGarment?.category || 'Upper'}
           />
         )}
 
