@@ -145,6 +145,8 @@ export function App() {
             onCaptured={handlePhotoCaptured}
             onCancel={handleResetSession}
             category={selectedGarment?.category || 'Upper'}
+            initialGarment={selectedGarment}
+            onSelectGarment={setSelectedGarment}
           />
         )}
 

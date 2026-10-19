@@ -436,8 +436,20 @@ export const ResultView: React.FC<ResultViewProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
-                <span>AI Try-On Drape</span>
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Mode B: Photoreal Virtual Try-On</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  kioskAudio.playBeep(650, 0.05);
+                  onTryAnother(); // Returns to live positioning camera with Mode A Live AR Drape active!
+                }}
+                className="px-3 py-1.5 rounded-full text-[11px] font-bold transition-all flex items-center gap-1.5 text-indigo-800 bg-indigo-50/90 hover:bg-indigo-100/90 border border-indigo-200 shadow-xs"
+                title="Return to live camera with real-time AR tracking drape"
+              >
+                <Activity className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Mode A: Live AR Drape (30 fps)</span>
               </button>
 
               <button

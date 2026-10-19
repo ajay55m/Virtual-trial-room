@@ -11,17 +11,23 @@ import {
   ArrowRight,
   ShieldAlert,
   XCircle,
-  Loader2
+  Loader2,
+  Sparkles,
+  Activity
 } from 'lucide-react';
-import type { PoseQualityMetrics } from '../types/kiosk';
+import type { PoseQualityMetrics, Garment } from '../types/kiosk';
+import { MOCK_GARMENTS } from '../data/mockGarments';
 import { kioskAudio } from '../utils/audio';
 import { poseLandmarkerService, type PoseGateEvaluation } from '../services/poseLandmarker';
+import { arDrapeEngine, type GarmentAnchorMetadata, type DrapeTelemetry } from '../services/arDrapeEngine';
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
 
 interface PositioningCameraProps {
   onCaptured: (photoUri: string, metrics: PoseQualityMetrics) => void;
   onCancel: () => void;
   category?: string;
+  initialGarment?: Garment;
+  onSelectGarment?: (garment: Garment) => void;
 }
 
 interface VideoDevice {
@@ -134,7 +140,9 @@ function drawPoseSkeleton(
 export const PositioningCamera: React.FC<PositioningCameraProps> = ({ 
   onCaptured, 
   onCancel,
-  category = 'Upper'
+  category = 'Upper',
+  initialGarment,
+  onSelectGarment
 }) => {
   const [activeMode, setActiveMode] = useState<'camera' | 'upload' | 'demo'>('camera');
   const [uploadedPreview, setUploadedPreview] = useState<string | null>(null);
@@ -152,12 +160,44 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
   const [isLoadingVision, setIsLoadingVision] = useState(true);
   const [gateResult, setGateResult] = useState<PoseGateEvaluation | null>(null);
 
+  // Phase 3 Mode A: Live AR Drape State
+  const [activeGarment, setActiveGarment] = useState<Garment>(initialGarment || MOCK_GARMENTS[1]);
+  const [overlayViewMode, setOverlayViewMode] = useState<'drape' | 'skeleton'>('drape');
+  const [loadedGarmentImage, setLoadedGarmentImage] = useState<HTMLImageElement | null>(null);
+  const [loadedGarmentMeta, setLoadedGarmentMeta] = useState<GarmentAnchorMetadata | null>(null);
+  const [drapeTelemetry, setDrapeTelemetry] = useState<DrapeTelemetry>({
+    fps: 30,
+    trackingLatencyMs: 18,
+    isAnchored: false,
+    shoulderWidthPx: 0,
+    rotationDegrees: 0
+  });
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const passedStartTimeRef = useRef<number | null>(null);
+
+  // Preload garment asset and metadata for real-time drape
+  useEffect(() => {
+    let isCancelled = false;
+    arDrapeEngine.preloadGarment(activeGarment.flatlayImage)
+      .then(({ img, meta }) => {
+        if (!isCancelled) {
+          setLoadedGarmentImage(img);
+          setLoadedGarmentMeta(meta);
+          arDrapeEngine.resetFilter();
+        }
+      })
+      .catch((err) => {
+        console.warn('[PositioningCamera] Could not preload garment for AR drape:', err);
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeGarment.flatlayImage]);
 
   const getCameraDevices = async () => {
     try {
@@ -263,6 +303,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
         videoRef.current.readyState >= 2 &&
         !videoRef.current.paused
       ) {
+        const loopStart = performance.now();
         const video = videoRef.current;
         const evaluation = poseLandmarkerService.evaluateVideoFrame(
           video,
@@ -273,7 +314,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
         if (evaluation) {
           setGateResult(evaluation);
 
-          // Render landmark skeleton & torso bounds on overlay canvas
+          // Render live AR drape or landmark skeleton on overlay canvas
           if (overlayCanvasRef.current) {
             const canvas = overlayCanvasRef.current;
             if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
@@ -281,18 +322,34 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
               canvas.height = video.videoHeight || 720;
             }
             const ctx = canvas.getContext('2d');
-            if (ctx && evaluation.landmarks) {
-              drawPoseSkeleton(
-                ctx,
-                evaluation.landmarks,
-                canvas.width,
-                canvas.height,
-                isMirrored,
-                evaluation.passed,
-                evaluation.torsoRect
-              );
-            } else if (ctx) {
+            if (ctx) {
               ctx.clearRect(0, 0, canvas.width, canvas.height);
+              if (evaluation.landmarks) {
+                if (overlayViewMode === 'drape' && loadedGarmentImage && loadedGarmentMeta) {
+                  const trackingLatency = Math.round(performance.now() - loopStart);
+                  const telemetry = arDrapeEngine.renderDrape(
+                    ctx,
+                    evaluation.landmarks,
+                    loadedGarmentMeta,
+                    loadedGarmentImage,
+                    canvas.width,
+                    canvas.height,
+                    isMirrored,
+                    trackingLatency
+                  );
+                  setDrapeTelemetry(telemetry);
+                } else {
+                  drawPoseSkeleton(
+                    ctx,
+                    evaluation.landmarks,
+                    canvas.width,
+                    canvas.height,
+                    isMirrored,
+                    evaluation.passed,
+                    evaluation.torsoRect
+                  );
+                }
+              }
             }
           }
 
@@ -327,7 +384,18 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
       isMounted = false;
       cancelAnimationFrame(animationFrameId);
     };
-  }, [activeMode, useWebcam, streamActive, selectedCategory, isMirrored, countdown, stabilityTime]);
+  }, [
+    activeMode, 
+    useWebcam, 
+    streamActive, 
+    selectedCategory, 
+    isMirrored, 
+    countdown, 
+    stabilityTime, 
+    overlayViewMode, 
+    loadedGarmentImage, 
+    loadedGarmentMeta
+  ]);
 
   const startCountdown = () => {
     kioskAudio.playBeep(800, 0.1);
@@ -615,6 +683,47 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
                 />
               )}
 
+              {/* Mode A: Top Status Badge & View Mode Toggle */}
+              <div className="absolute top-5 left-5 z-20 flex flex-wrap items-center gap-2.5">
+                <div className="px-3.5 py-1.5 rounded-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-xs font-black tracking-wider uppercase shadow-xl border border-indigo-400/50 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Mode A: Live AR Drape (30 fps)</span>
+                </div>
+
+                <div className="flex items-center gap-1 spatial-glass p-0.5 rounded-full border border-white/80 shadow-md">
+                  <button
+                    type="button"
+                    onClick={() => setOverlayViewMode('drape')}
+                    className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all ${
+                      overlayViewMode === 'drape'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-700 hover:text-slate-900'
+                    }`}
+                  >
+                    👗 AR Drape
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOverlayViewMode('skeleton')}
+                    className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all ${
+                      overlayViewMode === 'skeleton'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-700 hover:text-slate-900'
+                    }`}
+                  >
+                    🦴 Skeleton
+                  </button>
+                </div>
+              </div>
+
+              {/* Mode A: Real-Time Latency & FPS Counter */}
+              <div className="absolute top-5 right-5 z-20 flex items-center gap-2">
+                <div className="px-3.5 py-1.5 rounded-full bg-slate-900/85 backdrop-blur-md text-emerald-400 font-mono text-[11px] font-bold border border-white/20 shadow-lg flex items-center gap-2">
+                  <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                  <span>Tracking: {drapeTelemetry.trackingLatencyMs} ms | FPS: {drapeTelemetry.fps}</span>
+                </div>
+              </div>
+
               {/* Real-Time Live Guidance Banner */}
               <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center pointer-events-none max-w-[90%]">
                 {isLoadingVision ? (
@@ -647,6 +756,41 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
                 ) : null}
               </div>
 
+              {/* In-View Interactive Garment Carousel: Switch garments in real-time */}
+              <div className="absolute bottom-20 left-4 right-4 z-20 flex flex-col items-center pointer-events-auto">
+                <div className="spatial-glass px-4 py-2.5 rounded-2xl border border-white/90 shadow-2xl backdrop-blur-xl flex items-center gap-2 max-w-full overflow-x-auto no-scrollbar">
+                  <span className="text-[10px] font-mono font-bold text-slate-600 uppercase shrink-0 mr-1 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-indigo-600" />
+                    <span>Try on live:</span>
+                  </span>
+                  {MOCK_GARMENTS.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveGarment(g);
+                        setSelectedCategory(g.category === 'Full body' ? 'Full body' : 'Upper');
+                        if (onSelectGarment) onSelectGarment(g);
+                        kioskAudio.playBeep(700, 0.05);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 flex items-center gap-2 border transition-all ${
+                        activeGarment.id === g.id
+                          ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg scale-105'
+                          : 'bg-white/80 text-slate-800 hover:bg-white border-white/80 shadow-xs'
+                      }`}
+                    >
+                      <img
+                        src={g.flatlayImage}
+                        alt={g.name}
+                        className="w-5 h-5 object-contain rounded bg-white/40"
+                      />
+                      <span className="truncate max-w-[120px]">{g.name}</span>
+                      <span className="text-[10px] opacity-75">{g.price}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Bottom Quick Controls & Floating Prompt */}
               <div className="absolute bottom-6 flex flex-wrap items-center justify-center gap-3 px-4 z-20">
                 <button
@@ -656,7 +800,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
                     setUseWebcam(false);
                     openFilePicker();
                   }}
-                  className="spatial-glass pointer-events-auto px-4 py-2.5 rounded-full border border-white/90 flex items-center gap-2 shadow-xl text-xs font-bold text-indigo-800 bg-white/80 hover:bg-white hover:scale-105 active:scale-95 transition-all"
+                  className="spatial-glass pointer-events-auto px-4 py-2 rounded-full border border-white/90 flex items-center gap-2 shadow-xl text-xs font-bold text-indigo-800 bg-white/80 hover:bg-white hover:scale-105 active:scale-95 transition-all"
                 >
                   <Upload className="w-4 h-4 text-indigo-600" />
                   <span>Upload From Device Instead</span>

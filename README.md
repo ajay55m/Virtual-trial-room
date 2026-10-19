@@ -150,6 +150,28 @@ Every garment in the catalog must adhere to the physical try-on standard:
 
 ---
 
+## ⚡ Mode A: Live AR Drape (Phase 3 Implemented)
+
+A real-time, hardware-accelerated AR clothing drape pipeline running at **~30–60 fps** in the browser:
+- **Landmark Anchoring Math:**
+  - Garment neckline center maps to the midpoint between shoulders (`11`, `12`).
+  - Garment shoulder width scales to match the shopper's shoulder distance ($W_{\text{sh}} \times 1.15$ relaxed ease factor).
+  - Garment rotation tracks the shoulder slope angle $\theta = \text{atan2}(y_{12} - y_{11}, x_{12} - x_{11})$.
+  - Garment hem tracks the hip midpoint (`23`, `24`) for tops, or ankles (`27`, `28`) for sarees/gowns.
+- **Exponential Moving Average (EMA) Smoothing:**
+  - An EMA filter with $\alpha = 0.35$ eliminates high-frequency landmark jitter, providing fluid motion without lag.
+  - Automatic discontinuity reset triggers if subject jumps $> 20\%$ of frame width.
+- **Live Kiosk UI:**
+  - Labeled with the prominent badge: `Mode A: Live AR Drape (30 fps)`.
+  - Real-time telemetry counter: `Tracking: XX ms | FPS: YY`.
+  - Interactive on-screen garment selector carousel allowing shoppers to switch garments while looking in the camera.
+  - View toggle between `👗 AR Drape` and `🦴 Skeleton Guide`.
+- **Verification Commands:**
+  - Run `npx tsx scripts/test_ar_drape.ts` in `frontend/` (verifies 11 mathematical tracking checks).
+  - Run `python scripts/test_ar_drape_sequence.py` (generates 10-frame visual tracking proof and animated WebP at `frontend/public/assets/test_ar_drape_output/live_ar_drape_sequence.webp`).
+
+---
+
 ## 🔒 Security & Ephemeral Privacy
 
 All captured user stills, intermediate keypoint arrays, and segmentation masks are held temporarily in encrypted object storage (MinIO) with a **hard 15-minute TTL limit**. 
