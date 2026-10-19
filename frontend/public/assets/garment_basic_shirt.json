@@ -1,0 +1,36 @@
+{
+  "sku": "VF-TOP-SHT-03",
+  "name": "Basic Shirt",
+  "category": "upper",
+  "aspect_ratio": 1.0,
+  "neckline_center": [
+    0.5,
+    0.1
+  ],
+  "left_shoulder": [
+    0.33,
+    0.13
+  ],
+  "right_shoulder": [
+    0.67,
+    0.13
+  ],
+  "hem_center": [
+    0.5,
+    0.92
+  ],
+  "left_cuff": [
+    0.11,
+    0.52
+  ],
+  "right_cuff": [
+    0.9,
+    0.52
+  ],
+  "bbox": [
+    0.11,
+    0.07,
+    0.9,
+    0.92
+  ]
+}

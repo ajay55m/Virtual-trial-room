@@ -1,0 +1,28 @@
+{
+  "sku": "AUR-SR-EMR-03",
+  "name": "Emerald Brocade Zari Saree",
+  "category": "overall",
+  "aspect_ratio": 0.7467,
+  "neckline_center": [
+    0.44,
+    0.11
+  ],
+  "left_shoulder": [
+    0.29,
+    0.13
+  ],
+  "right_shoulder": [
+    0.58,
+    0.13
+  ],
+  "hem_center": [
+    0.48,
+    0.97
+  ],
+  "bbox": [
+    0.21,
+    0.07,
+    0.94,
+    0.98
+  ]
+}

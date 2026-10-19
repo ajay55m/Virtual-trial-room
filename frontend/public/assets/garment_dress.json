@@ -1,0 +1,28 @@
+{
+  "sku": "EMR-EVE-GWN-08",
+  "name": "Emerald Evening Gown",
+  "category": "overall",
+  "aspect_ratio": 0.7467,
+  "neckline_center": [
+    0.5,
+    0.09
+  ],
+  "left_shoulder": [
+    0.37,
+    0.12
+  ],
+  "right_shoulder": [
+    0.62,
+    0.12
+  ],
+  "hem_center": [
+    0.6,
+    0.96
+  ],
+  "bbox": [
+    0.2,
+    0.06,
+    0.81,
+    0.96
+  ]
+}

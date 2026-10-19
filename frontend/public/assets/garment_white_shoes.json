@@ -1,0 +1,20 @@
+{
+  "sku": "VF-FTW-SNK-05",
+  "name": "Short shoes (White)",
+  "category": "lower",
+  "aspect_ratio": 1.0,
+  "waist_center": [
+    0.5,
+    0.35
+  ],
+  "hem_center": [
+    0.5,
+    0.85
+  ],
+  "bbox": [
+    0.0,
+    0.0,
+    0.99,
+    0.99
+  ]
+}

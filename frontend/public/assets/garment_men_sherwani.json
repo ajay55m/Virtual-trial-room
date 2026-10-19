@@ -1,0 +1,36 @@
+{
+  "sku": "AUR-MN-SHR-10",
+  "name": "Imperial Ivory Embroidered Sherwani",
+  "category": "overall",
+  "aspect_ratio": 0.7467,
+  "neckline_center": [
+    0.5,
+    0.08
+  ],
+  "left_shoulder": [
+    0.31,
+    0.12
+  ],
+  "right_shoulder": [
+    0.69,
+    0.12
+  ],
+  "hem_center": [
+    0.5,
+    0.98
+  ],
+  "left_cuff": [
+    0.12,
+    0.52
+  ],
+  "right_cuff": [
+    0.88,
+    0.52
+  ],
+  "bbox": [
+    0.01,
+    0.05,
+    0.99,
+    0.99
+  ]
+}

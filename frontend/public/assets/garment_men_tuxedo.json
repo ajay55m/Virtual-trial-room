@@ -1,0 +1,36 @@
+{
+  "sku": "AUR-MN-TXD-20",
+  "name": "Midnight Velvet Shawl-Lapel Tuxedo",
+  "category": "overall",
+  "aspect_ratio": 0.7467,
+  "neckline_center": [
+    0.5,
+    0.12
+  ],
+  "left_shoulder": [
+    0.27,
+    0.15
+  ],
+  "right_shoulder": [
+    0.73,
+    0.15
+  ],
+  "hem_center": [
+    0.5,
+    0.92
+  ],
+  "left_cuff": [
+    0.06,
+    0.58
+  ],
+  "right_cuff": [
+    0.94,
+    0.58
+  ],
+  "bbox": [
+    0.04,
+    0.09,
+    0.96,
+    0.93
+  ]
+}

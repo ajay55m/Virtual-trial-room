@@ -1,0 +1,28 @@
+{
+  "sku": "AUR-SR-KNJ-01",
+  "name": "Crimson & Gold Kanjeevaram Saree",
+  "category": "overall",
+  "aspect_ratio": 0.7467,
+  "neckline_center": [
+    0.38,
+    0.12
+  ],
+  "left_shoulder": [
+    0.24,
+    0.13
+  ],
+  "right_shoulder": [
+    0.54,
+    0.13
+  ],
+  "hem_center": [
+    0.45,
+    0.97
+  ],
+  "bbox": [
+    0.15,
+    0.06,
+    0.95,
+    0.98
+  ]
+}

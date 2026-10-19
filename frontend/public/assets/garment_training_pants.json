@@ -1,0 +1,28 @@
+{
+  "sku": "VF-BOT-TRN-06",
+  "name": "Training Pants",
+  "category": "lower",
+  "aspect_ratio": 1.0,
+  "waist_center": [
+    0.5,
+    0.08
+  ],
+  "left_hip": [
+    0.25,
+    0.14
+  ],
+  "right_hip": [
+    0.75,
+    0.14
+  ],
+  "hem_center": [
+    0.5,
+    0.96
+  ],
+  "bbox": [
+    0.0,
+    0.0,
+    0.99,
+    0.99
+  ]
+}

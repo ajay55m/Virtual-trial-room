@@ -1,0 +1,36 @@
+{
+  "sku": "CYB-TCK-JKT-11",
+  "name": "Cybernetic Techwear Jacket",
+  "category": "upper",
+  "aspect_ratio": 0.7467,
+  "neckline_center": [
+    0.51,
+    0.13
+  ],
+  "left_shoulder": [
+    0.36,
+    0.16
+  ],
+  "right_shoulder": [
+    0.66,
+    0.16
+  ],
+  "hem_center": [
+    0.5,
+    0.89
+  ],
+  "left_cuff": [
+    0.08,
+    0.55
+  ],
+  "right_cuff": [
+    0.92,
+    0.55
+  ],
+  "bbox": [
+    0.08,
+    0.1,
+    0.92,
+    0.89
+  ]
+}

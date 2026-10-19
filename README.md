@@ -127,6 +127,29 @@ The live camera feed evaluates every frame using `@mediapipe/tasks-vision` (`pos
 
 ---
 
+## 👗 Garment Asset Standard (Phase 2 Implemented)
+
+Every garment in the catalog must adhere to the physical try-on standard:
+- **Format:** Isolated transparent PNG (`RGBA`) with transparent outer border pixels ($alpha < 10$). Rejects solid rectangles or renamed JPEGs.
+- **Draping Geometry:** Garments must be photographed flat-lay or ghost-mannequin with sleeves extended outwards in an A-pose (no crossed sleeves, no folded arms).
+- **Companion Metadata (`<garment_name>.json`):**
+  - `category`: `"upper"` | `"lower"` | `"overall"`
+  - `aspect_ratio`: Float matching image width / height within 2%.
+  - Normalized anchor keypoints `[x, y]` in `[0, 1]`:
+    - `neckline_center`: Upper collar/neckline midpoint.
+    - `left_shoulder` / `right_shoulder`: Shoulder seam endpoints.
+    - `hem_center`: Bottom hem midpoint.
+    - `left_cuff` / `right_cuff`: Sleeve wrist endpoints (sleeves extended).
+    - `waist_center` / `left_hip` / `right_hip` (for pants / lower body).
+- **Automated Catalog Validator:** Run `python scripts/validate_garment_assets.py` to validate all catalog PNGs and metadata JSONs.
+- **Defects Fixed:**
+  - Folded sweater defect replaced with flat-lay cashmere sweater with extended sleeves.
+  - Saree catalog assets (`kanjeevaram`, `banarasi`, `emerald`) converted from solid JPEGs to transparent ghost-mannequin PNGs.
+  - White t-shirt recentered with clean alpha margins.
+  - 100% of catalog assets (16/16) have companion JSON anchors and pass automated validation.
+
+---
+
 ## 🔒 Security & Ephemeral Privacy
 
 All captured user stills, intermediate keypoint arrays, and segmentation masks are held temporarily in encrypted object storage (MinIO) with a **hard 15-minute TTL limit**. 
