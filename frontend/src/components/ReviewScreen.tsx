@@ -1,5 +1,5 @@
-import React from 'react';
-import { RotateCcw, ShieldCheck, Cpu, ArrowRight } from 'lucide-react';
+import React, { useRef, useState, useEffect } from 'react';
+import { RotateCcw, ShieldCheck, Cpu, ArrowRight, Upload } from 'lucide-react';
 import type { PoseQualityMetrics } from '../types/kiosk';
 import { kioskAudio } from '../utils/audio';
 
@@ -8,14 +8,89 @@ interface ReviewScreenProps {
   metrics: PoseQualityMetrics;
   onConfirm: () => void;
   onRetake: () => void;
+  onUploadNew?: (newUri: string) => void;
 }
 
 export const ReviewScreen: React.FC<ReviewScreenProps> = ({
   photoUri,
   metrics,
   onConfirm,
-  onRetake
+  onRetake,
+  onUploadNew
 }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const processUploadedFile = (file: File) => {
+    if (!file || !file.type.startsWith('image/')) {
+      alert('Please select an image file (JPEG, PNG, WEBP).');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl && onUploadNew) {
+        kioskAudio.playShutterSound();
+        onUploadNew(dataUrl);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processUploadedFile(file);
+    }
+    e.target.value = '';
+  };
+
+  const openFilePicker = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processUploadedFile(file);
+    }
+  };
+
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            processUploadedFile(file);
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [onUploadNew]);
   const handleConfirm = () => {
     kioskAudio.playBeep(800, 0.1);
     onConfirm();
@@ -28,9 +103,23 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
 
   return (
     <div className="relative w-full h-full min-h-[calc(100vh-5rem)] flex flex-col p-6 select-none overflow-y-auto">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileUpload}
+        className="hidden"
+      />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 max-w-6xl mx-auto w-full my-auto">
         {/* Left Col: Captured Photo Preview */}
-        <div className="lg:col-span-2 spatial-glass rounded-[2.5rem] overflow-hidden border border-white/80 p-6 flex flex-col items-center justify-center shadow-2xl">
+        <div 
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`lg:col-span-2 spatial-glass rounded-[2.5rem] overflow-hidden border transition-all p-6 flex flex-col items-center justify-center shadow-2xl relative ${
+            isDragging ? 'border-indigo-600 bg-indigo-500/20 scale-[1.01]' : 'border-white/80'
+          }`}
+        >
           <div className="relative w-full max-h-[65vh] overflow-hidden rounded-3xl border border-white/60 flex items-center justify-center bg-white/30">
             <img
               src={photoUri}
@@ -43,6 +132,14 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
               <span className="text-xs font-bold text-slate-900">EXIF REMOVED & VALIDATED</span>
             </div>
+
+            {/* Drag hint overlay */}
+            {isDragging && (
+              <div className="absolute inset-0 bg-indigo-900/60 backdrop-blur-xs flex flex-col items-center justify-center text-white z-20">
+                <Upload className="w-12 h-12 mb-2 animate-bounce" />
+                <span className="text-base font-bold">Drop your image here to use it!</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -94,11 +191,20 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
             </button>
 
             <button
-              onClick={handleRetake}
-              className="w-full py-3.5 px-6 rounded-2xl spatial-pill border border-white/80 text-slate-700 hover:text-slate-900 font-semibold flex items-center justify-center gap-2 text-sm hover:bg-white/70 transition shadow-xs"
+              type="button"
+              onClick={openFilePicker}
+              className="w-full py-3.5 px-6 rounded-2xl spatial-pill border-2 border-indigo-400/50 text-indigo-800 hover:text-indigo-900 font-bold flex items-center justify-center gap-2 text-sm bg-indigo-50/70 hover:bg-white transition shadow-xs"
             >
-              <RotateCcw className="w-4 h-4" />
-              <span>RETAKE PHOTO</span>
+              <Upload className="w-4 h-4 text-indigo-600" />
+              <span>UPLOAD PHOTO FROM DEVICE</span>
+            </button>
+
+            <button
+              onClick={handleRetake}
+              className="w-full py-3 px-6 rounded-2xl spatial-pill border border-white/80 text-slate-700 hover:text-slate-900 font-semibold flex items-center justify-center gap-2 text-xs hover:bg-white/70 transition shadow-xs"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>RETAKE PHOTO WITH WEBCAM</span>
             </button>
           </div>
         </div>

@@ -106,6 +106,8 @@ export const ResultView: React.FC<ResultViewProps> = ({
     }
   };
 
+  const [isDragging, setIsDragging] = useState(false);
+
   // Re-drape when component mounts or original photo changes
   useEffect(() => {
     if (!tryonResultUri || tryonResultUri === defaultModelUri) {
@@ -113,10 +115,11 @@ export const ResultView: React.FC<ResultViewProps> = ({
     }
   }, [currentPersonPhoto, garment]);
 
-  const handlePersonPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processPersonPhoto = (file: File) => {
+    if (!file || !file.type.startsWith('image/')) {
+      alert('Please select a valid image file (JPEG, PNG, WEBP).');
+      return;
+    }
     const reader = new FileReader();
     reader.onload = async (event) => {
       const dataUrl = event.target?.result as string;
@@ -128,6 +131,61 @@ export const ResultView: React.FC<ResultViewProps> = ({
     };
     reader.readAsDataURL(file);
   };
+
+  const handlePersonPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processPersonPhoto(file);
+    }
+    e.target.value = '';
+  };
+
+  const openPhotoPicker = () => {
+    if (photoInputRef.current) {
+      photoInputRef.current.value = '';
+      photoInputRef.current.click();
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processPersonPhoto(file);
+    }
+  };
+
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            processPersonPhoto(file);
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [currentSize, tuningOptions]);
 
   const handleSizeChange = async (newSize: string) => {
     kioskAudio.playBeep(800, 0.05);
@@ -242,7 +300,12 @@ export const ResultView: React.FC<ResultViewProps> = ({
           
           {/* Main Viewport Container */}
           <div 
-            className="relative w-full h-[64vh] min-h-[480px] rounded-3xl overflow-hidden border border-white/70 flex items-center justify-center bg-white/20 shadow-inner cursor-crosshair"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`relative w-full h-[64vh] min-h-[480px] rounded-3xl overflow-hidden border flex items-center justify-center bg-white/20 shadow-inner cursor-crosshair transition-all ${
+              isDragging ? 'border-indigo-600 bg-indigo-500/20 scale-[1.01]' : 'border-white/70'
+            }`}
             onMouseMove={handleSplitMouseMove}
             onTouchMove={handleSplitMouseMove}
           >
@@ -254,6 +317,14 @@ export const ResultView: React.FC<ResultViewProps> = ({
               onChange={handlePersonPhotoUpload} 
               className="hidden" 
             />
+
+            {/* Drag hint overlay */}
+            {isDragging && (
+              <div className="absolute inset-0 bg-indigo-900/60 backdrop-blur-xs flex flex-col items-center justify-center text-white z-30 pointer-events-none">
+                <Upload className="w-12 h-12 mb-2 animate-bounce" />
+                <span className="text-base font-bold">Drop your photo here to wear this outfit!</span>
+              </div>
+            )}
 
             {/* View 1 & 2: Base Fitted or Studio Model Render */}
             <img
@@ -416,7 +487,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
 
               {/* Instant Upload/Swap Person Photo Button */}
               <button
-                onClick={() => photoInputRef.current?.click()}
+                onClick={openPhotoPicker}
                 className="px-3 py-1.5 rounded-full text-[11px] font-bold transition-all flex items-center gap-1.5 text-indigo-700 bg-indigo-50/80 hover:bg-white border border-indigo-200/60 shadow-xs"
                 title="Upload a new person image to wear this outfit"
               >

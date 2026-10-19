@@ -132,7 +132,15 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
     };
   }, [useWebcam, selectedDeviceId]);
 
+  const [isDragging, setIsDragging] = useState(false);
+
   useEffect(() => {
+    if (activeMode !== 'camera' || !useWebcam || !streamActive) {
+      setStabilityTime(0);
+      setCountdown(null);
+      return;
+    }
+
     const interval = setInterval(() => {
       setStabilityTime((prev) => {
         if (prev >= 1.0) {
@@ -146,7 +154,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
     }, 250);
 
     return () => clearInterval(interval);
-  }, [countdown]);
+  }, [countdown, activeMode, useWebcam, streamActive]);
 
   const startCountdown = () => {
     kioskAudio.playBeep(800, 0.1);
@@ -189,9 +197,11 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
     return '/assets/virtualfit_model_tshirt.jpg';
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processUploadedFile = (file: File) => {
+    if (!file || !file.type.startsWith('image/')) {
+      alert('Please select a valid image file (JPEG, PNG, WEBP).');
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -201,10 +211,68 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
         setUploadedPreview(dataUrl);
         setActiveMode('upload');
         setUseWebcam(false);
+        setCountdown(null);
+        setStabilityTime(0);
       }
     };
     reader.readAsDataURL(file);
   };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processUploadedFile(file);
+    }
+    e.target.value = '';
+  };
+
+  const openFilePicker = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processUploadedFile(file);
+    }
+  };
+
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            processUploadedFile(file);
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, []);
 
   const demoImageUri = demoModel === 'female' ? '/assets/demo_person.jpg' : '/assets/virtualfit_model_tshirt.jpg';
 
@@ -233,7 +301,12 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
       {/* Main Vision Interface Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full flex-1">
         {/* Left 3 cols: Live Video Feed / Upload Zone / Silhouette HUD */}
-        <div className="lg:col-span-3 spatial-glass rounded-[2.5rem] overflow-hidden relative border border-white/80 flex items-center justify-center min-h-[60vh] shadow-2xl">
+        <div 
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className="lg:col-span-3 spatial-glass rounded-[2.5rem] overflow-hidden relative border border-white/80 flex items-center justify-center min-h-[60vh] shadow-2xl"
+        >
           
           {/* MODE 1: UPLOAD PERSON PHOTO */}
           {activeMode === 'upload' && (
@@ -256,7 +329,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
                       <ArrowRight className="w-4 h-4 text-indigo-200" />
                     </button>
                     <button
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={openFilePicker}
                       className="w-full py-2.5 px-4 rounded-xl spatial-pill border border-white/80 text-slate-700 hover:text-slate-900 text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-white/70"
                     >
                       <RefreshCw className="w-3.5 h-3.5 text-slate-600" />
@@ -266,19 +339,24 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
                 </div>
               ) : (
                 <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full max-w-lg p-10 border-2 border-dashed border-indigo-400/80 rounded-[2.5rem] bg-indigo-500/5 hover:bg-indigo-500/10 cursor-pointer transition-all flex flex-col items-center justify-center group"
+                  onClick={openFilePicker}
+                  className={`w-full max-w-lg p-10 border-2 border-dashed rounded-[2.5rem] cursor-pointer transition-all flex flex-col items-center justify-center group ${
+                    isDragging
+                      ? 'border-indigo-600 bg-indigo-500/20 scale-102 shadow-2xl'
+                      : 'border-indigo-400/80 bg-indigo-500/5 hover:bg-indigo-500/10'
+                  }`}
                 >
                   <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center shadow-lg mb-5 group-hover:scale-105 transition-transform">
                     <Upload className="w-10 h-10" />
                   </div>
                   <h4 className="text-xl font-black text-slate-900 mb-2">Upload Person Photo</h4>
                   <p className="text-xs text-slate-600 max-w-sm mb-6 leading-relaxed">
-                    Select or drag-and-drop any photo of yourself or a person (half-body or full-body). The clothing will be fitted directly onto this person!
+                    Select, drag-and-drop, or paste (Ctrl+V) any photo of yourself or a person. The clothing will be fitted directly onto this photo!
                   </p>
                   <button
                     type="button"
-                    className="px-6 py-3 rounded-2xl spatial-btn-primary text-white text-xs font-bold tracking-wider shadow-lg"
+                    onClick={openFilePicker}
+                    className="px-6 py-3 rounded-2xl spatial-btn-primary text-white text-xs font-bold tracking-wider shadow-lg hover:brightness-110"
                   >
                     BROWSE FILES FROM DEVICE
                   </button>
@@ -354,12 +432,26 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
                   </div>
                 </div>
 
-                {/* Active Floating Prompt */}
-                <div className="absolute bottom-8 spatial-glass px-6 py-3 rounded-full border border-white/90 flex items-center gap-3 shadow-xl">
-                  <Sparkles className="w-5 h-5 text-indigo-700 animate-spin" style={{ animationDuration: '4s' }} />
-                  <span className="text-sm font-bold text-slate-900 tracking-wide">
-                    {stabilityTime < 1.0 ? 'Hold pose steady inside outline...' : 'Pose locked! Keep still...'}
-                  </span>
+                {/* Active Floating Prompt & Direct Upload Shortcut */}
+                <div className="absolute bottom-8 flex flex-wrap items-center justify-center gap-3 px-4 z-20">
+                  <div className="spatial-glass px-6 py-3 rounded-full border border-white/90 flex items-center gap-3 shadow-xl">
+                    <Sparkles className="w-5 h-5 text-indigo-700 animate-spin" style={{ animationDuration: '4s' }} />
+                    <span className="text-sm font-bold text-slate-900 tracking-wide">
+                      {stabilityTime < 1.0 ? 'Hold pose steady inside outline...' : 'Pose locked! Keep still...'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveMode('upload');
+                      setUseWebcam(false);
+                      openFilePicker();
+                    }}
+                    className="spatial-glass pointer-events-auto px-4 py-3 rounded-full border border-white/90 flex items-center gap-2 shadow-xl text-xs font-bold text-indigo-800 bg-white/80 hover:bg-white hover:scale-105 active:scale-95 transition-all"
+                  >
+                    <Upload className="w-4 h-4 text-indigo-600" />
+                    <span>Upload From Device</span>
+                  </button>
                 </div>
               </div>
 

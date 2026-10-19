@@ -153,6 +153,7 @@ export function App() {
             metrics={poseMetrics}
             onConfirm={handleReviewConfirm}
             onRetake={() => setCurrentState('POSITIONING')}
+            onUploadNew={(newUri) => handlePhotoCaptured(newUri, poseMetrics)}
           />
         )}
 

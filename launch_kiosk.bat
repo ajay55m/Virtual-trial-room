@@ -23,9 +23,9 @@ timeout /t 3 /nobreak > nul
 echo [*] Launching Display in Retail Kiosk Lockdown Mode...
 where chrome >nul 2>nul
 if %errorlevel% equ 0 (
-    start chrome --kiosk --incognito --disable-pinch --overscroll-history-navigation=0 "http://localhost:5173"
+    start chrome --app="http://localhost:5173" --start-maximized
 ) else (
-    start msedge --kiosk --incognito "http://localhost:5173"
+    start msedge --app="http://localhost:5173" --start-maximized
 )
 
 echo.
