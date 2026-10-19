@@ -82,3 +82,50 @@ export interface TelemetryLog {
   message: string;
 }
 
+export interface MatchingItem {
+  id: string;
+  name: string;
+  category: string;
+  price: string;
+  reason: string;
+  thumbnail: string;
+}
+
+export interface StyleAdvice {
+  garmentId: string;
+  selectedSize: string;
+  recommendedSize: string;
+  returnRiskScore: number; // 0-100%
+  returnRiskLevel: 'Low' | 'Moderate' | 'High';
+  primaryRiskFactor?: string;
+  fitVerdict: string;
+  stretchTolerance: string;
+  bodyProportionNotes: string;
+  stylingSuggestions: string[];
+  matchingItems: MatchingItem[];
+  modelSource: string;
+}
+
+export interface AssistantChatMessage {
+  id: string;
+  sender: 'user' | 'assistant';
+  text: string;
+  timestamp: string;
+  suggestedQuestions?: string[];
+}
+
+export interface SAMSegmentationResponse {
+  status: string;
+  sessionId: string;
+  maskUrl: string;
+  agnosticImageUrl: string;
+  metadata: {
+    category: string;
+    mask_coverage_percent: number;
+    torso_box: number[];
+    protected_face_box: number[];
+    resolution: string;
+  };
+}
+
+

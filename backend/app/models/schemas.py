@@ -117,3 +117,46 @@ class TelemetryLog(BaseModel):
     level: Literal['INFO', 'WARN', 'ERROR', 'AUDIT']
     component: Literal['EdgeVision', 'GatewayAPI', 'CeleryQueue', 'VTONWorker', 'SecurityAudit']
     message: str
+
+# Llama Style Assistant & Return Reduction Models
+class StyleAdviceRequest(BaseModel):
+    sessionId: str
+    garmentId: str
+    selectedSize: str
+    heightCm: Optional[float] = 175.0
+    fitIntent: Optional[Literal['Slim', 'Regular', 'Relaxed']] = 'Regular'
+
+class MatchingItem(BaseModel):
+    id: str
+    name: str
+    category: str
+    price: str
+    reason: str
+    thumbnail: str
+
+class StyleAdviceResponse(BaseModel):
+    garmentId: str
+    selectedSize: str
+    recommendedSize: str
+    returnRiskScore: int = Field(ge=0, le=100) # e.g. 12% = Low, 85% = High risk
+    returnRiskLevel: Literal['Low', 'Moderate', 'High']
+    primaryRiskFactor: Optional[str] = None
+    fitVerdict: str
+    stretchTolerance: str
+    bodyProportionNotes: str
+    stylingSuggestions: List[str]
+    matchingItems: List[MatchingItem]
+    modelSource: str = "Meta-Llama-3.2-Instruct"
+
+class AssistantChatRequest(BaseModel):
+    sessionId: str
+    garmentId: str
+    selectedSize: str
+    userMessage: str
+    chatHistory: Optional[List[dict]] = []
+
+class AssistantChatResponse(BaseModel):
+    reply: str
+    suggestedQuestions: List[str]
+    modelSource: str = "Meta-Llama-3.2-Instruct"
+

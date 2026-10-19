@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, CheckCircle2, Sparkles, Video, UserCheck, RefreshCw, AlertCircle, Settings2, Upload } from 'lucide-react';
+import { 
+  Camera, 
+  CheckCircle2, 
+  Sparkles, 
+  Video, 
+  UserCheck, 
+  RefreshCw, 
+  AlertCircle, 
+  Settings2, 
+  Upload, 
+  ArrowRight 
+} from 'lucide-react';
 import type { PoseQualityMetrics } from '../types/kiosk';
 import { kioskAudio } from '../utils/audio';
 
@@ -14,6 +25,8 @@ interface VideoDevice {
 }
 
 export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured, onCancel }) => {
+  const [activeMode, setActiveMode] = useState<'camera' | 'upload' | 'demo'>('camera');
+  const [uploadedPreview, setUploadedPreview] = useState<string | null>(null);
   const [useWebcam, setUseWebcam] = useState(true);
   const [demoModel, setDemoModel] = useState<'female' | 'male'>('male');
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -185,15 +198,9 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
       const dataUrl = event.target?.result as string;
       if (dataUrl) {
         kioskAudio.playShutterSound();
-        onCaptured(dataUrl, {
-          sharpnessVariance: 520,
-          bodyHeightPercent: 86,
-          horizontalCenterOffset: 0,
-          shoulderYawDegrees: 0,
-          personCount: 1,
-          aPoseCompliant: true,
-          stabilityTimeSec: 1.0
-        });
+        setUploadedPreview(dataUrl);
+        setActiveMode('upload');
+        setUseWebcam(false);
       }
     };
     reader.readAsDataURL(file);
@@ -202,7 +209,11 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
   const demoImageUri = demoModel === 'female' ? '/assets/demo_person.jpg' : '/assets/virtualfit_model_tshirt.jpg';
 
   const triggerCapture = () => {
-    const targetImage = useWebcam && streamActive
+    if (activeMode === 'upload' && uploadedPreview) {
+      onCaptured(uploadedPreview, metrics);
+      return;
+    }
+    const targetImage = (activeMode === 'camera' && useWebcam && streamActive)
       ? captureVideoFrame()
       : demoImageUri;
     onCaptured(targetImage, metrics);
@@ -221,142 +232,265 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
 
       {/* Main Vision Interface Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full flex-1">
-        {/* Left 3 cols: Live Video Feed / Silhouette HUD */}
+        {/* Left 3 cols: Live Video Feed / Upload Zone / Silhouette HUD */}
         <div className="lg:col-span-3 spatial-glass rounded-[2.5rem] overflow-hidden relative border border-white/80 flex items-center justify-center min-h-[60vh] shadow-2xl">
-          {/* Feed Content */}
-          {useWebcam ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className={`w-full h-full object-cover ${isMirrored ? 'transform -scale-x-100' : ''}`}
-            />
-          ) : (
-            <img
-              src={demoImageUri}
-              alt="Guided Pose Demo"
-              className="w-full h-full object-contain max-h-[75vh]"
-            />
-          )}
-
-          {/* Silhouette Overlay & Skeleton HUD */}
-          <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-            {/* Corner Bracket HUD */}
-            <div className="absolute top-6 left-6 w-12 h-12 border-t-2 border-l-2 border-slate-800/80 rounded-tl-2xl" />
-            <div className="absolute top-6 right-6 w-12 h-12 border-t-2 border-r-2 border-slate-800/80 rounded-tr-2xl" />
-            <div className="absolute bottom-6 left-6 w-12 h-12 border-b-2 border-l-2 border-slate-800/80 rounded-bl-2xl" />
-            <div className="absolute bottom-6 right-6 w-12 h-12 border-b-2 border-r-2 border-slate-800/80 rounded-br-2xl" />
-
-            {/* Silhouette Outline Guide */}
-            <div
-              className={`w-72 h-[75%] border-2 rounded-full flex flex-col items-center justify-between p-6 transition-all duration-500 ${
-                stabilityTime >= 1.0 ? 'border-emerald-600/90 bg-emerald-500/15' : 'border-slate-800/60 bg-white/10'
-              }`}
-            >
-              <div className="w-16 h-16 rounded-full border border-slate-700/50 mt-4" />
-              <div className="w-full border-t border-slate-700/40 my-auto" />
-              <div className="text-[10px] font-mono font-bold text-slate-800 spatial-pill px-3 py-1 border border-white/80 shadow-xs">
-                A-POSE ALIGNMENT
-              </div>
-            </div>
-
-            {/* Active Floating Prompt */}
-            <div className="absolute bottom-8 spatial-glass px-6 py-3 rounded-full border border-white/90 flex items-center gap-3 shadow-xl">
-              <Sparkles className="w-5 h-5 text-indigo-700 animate-spin" style={{ animationDuration: '4s' }} />
-              <span className="text-sm font-bold text-slate-900 tracking-wide">
-                {stabilityTime < 1.0 ? 'Hold pose steady inside outline...' : 'Pose locked! Keep still...'}
-              </span>
-            </div>
-          </div>
-
-          {/* Countdown Overlay */}
-          {countdown !== null && (
-            <div className="absolute inset-0 bg-white/70 backdrop-blur-md flex flex-col items-center justify-center z-30">
-              <div className="text-9xl font-black text-slate-900 animate-ping">
-                {countdown > 0 ? countdown : 'FLASH'}
-              </div>
-              <div className="text-xl font-extrabold text-slate-800 tracking-widest mt-6">CAPTURING FRAME</div>
-            </div>
-          )}
-
-          {/* Camera Controls Bar (Top Left) */}
-          <div className="absolute top-6 left-6 z-20 flex flex-wrap items-center gap-2 max-w-[90%]">
-            <button
-              onClick={() => setUseWebcam(!useWebcam)}
-              className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shadow-xs transition-all border ${
-                useWebcam
-                  ? 'spatial-pill-active border-white text-slate-900'
-                  : 'spatial-pill border-white/70 text-slate-700 hover:bg-white/60'
-              }`}
-            >
-              <Video className="w-4 h-4 text-slate-800" />
-              <span>{useWebcam ? '● Live Laptop Camera' : 'Switch to Live Camera'}</span>
-            </button>
-
-            {useWebcam && videoDevices.length > 1 && (
-              <div className="flex items-center gap-1.5 spatial-pill rounded-full px-3 py-1.5 border border-white/70 shadow-xs">
-                <Settings2 className="w-3.5 h-3.5 text-slate-600" />
-                <select
-                  value={selectedDeviceId}
-                  onChange={(e) => setSelectedDeviceId(e.target.value)}
-                  className="bg-transparent text-xs text-slate-800 outline-none cursor-pointer font-semibold"
+          
+          {/* MODE 1: UPLOAD PERSON PHOTO */}
+          {activeMode === 'upload' && (
+            <div className="w-full h-full min-h-[55vh] flex flex-col items-center justify-center p-8 text-center animate-fade-in z-10">
+              {uploadedPreview ? (
+                <div className="flex flex-col items-center max-w-md w-full">
+                  <div className="relative w-72 h-96 rounded-3xl overflow-hidden border-2 border-indigo-500 shadow-2xl mb-4 bg-white/20">
+                    <img src={uploadedPreview} alt="User Upload" className="w-full h-full object-contain" />
+                    <div className="absolute top-3 right-3 bg-emerald-600 text-white text-[10px] font-bold px-3 py-1 rounded-full flex items-center gap-1 shadow-md">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>PHOTO READY</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2.5 w-full">
+                    <button
+                      onClick={() => onCaptured(uploadedPreview, metrics)}
+                      className="w-full py-3.5 px-6 rounded-2xl spatial-btn-primary text-white font-bold flex items-center justify-center gap-2 shadow-xl hover:brightness-110 active:scale-98"
+                    >
+                      <span>USE THIS PHOTO & TRY ON CLOTHES</span>
+                      <ArrowRight className="w-4 h-4 text-indigo-200" />
+                    </button>
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full py-2.5 px-4 rounded-xl spatial-pill border border-white/80 text-slate-700 hover:text-slate-900 text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-white/70"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-slate-600" />
+                      <span>Choose Different Photo</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full max-w-lg p-10 border-2 border-dashed border-indigo-400/80 rounded-[2.5rem] bg-indigo-500/5 hover:bg-indigo-500/10 cursor-pointer transition-all flex flex-col items-center justify-center group"
                 >
-                  {videoDevices.map((d) => (
-                    <option key={d.deviceId} value={d.deviceId} className="bg-white text-slate-900">
-                      {d.label}
-                    </option>
-                  ))}
-                </select>
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center shadow-lg mb-5 group-hover:scale-105 transition-transform">
+                    <Upload className="w-10 h-10" />
+                  </div>
+                  <h4 className="text-xl font-black text-slate-900 mb-2">Upload Person Photo</h4>
+                  <p className="text-xs text-slate-600 max-w-sm mb-6 leading-relaxed">
+                    Select or drag-and-drop any photo of yourself or a person (half-body or full-body). The clothing will be fitted directly onto this person!
+                  </p>
+                  <button
+                    type="button"
+                    className="px-6 py-3 rounded-2xl spatial-btn-primary text-white text-xs font-bold tracking-wider shadow-lg"
+                  >
+                    BROWSE FILES FROM DEVICE
+                  </button>
+
+                  {/* Quick Sample Presets */}
+                  <div className="mt-8 pt-6 border-t border-slate-300/60 w-full">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-3">Or quick-try with sample photos:</span>
+                    <div className="flex items-center justify-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setUploadedPreview('/assets/demo_person_male.jpg');
+                        }}
+                        className="px-3 py-1.5 rounded-full spatial-pill border border-white/80 text-xs font-semibold text-slate-700 hover:bg-white flex items-center gap-1 shadow-xs"
+                      >
+                        <span>👤 Male Model</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setUploadedPreview('/assets/demo_person.jpg');
+                        }}
+                        className="px-3 py-1.5 rounded-full spatial-pill border border-white/80 text-xs font-semibold text-slate-700 hover:bg-white flex items-center gap-1 shadow-xs"
+                      >
+                        <span>👩 Female Model</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* MODE 2: LIVE CAMERA FEED */}
+          {activeMode === 'camera' && (
+            <>
+              {useWebcam ? (
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full object-cover ${isMirrored ? 'transform -scale-x-100' : ''}`}
+                />
+              ) : (
+                <img
+                  src={demoImageUri}
+                  alt="Guided Pose Demo"
+                  className="w-full h-full object-contain max-h-[75vh]"
+                />
+              )}
+
+              {/* Silhouette Overlay & Skeleton HUD */}
+              <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                {/* Corner Bracket HUD */}
+                <div className="absolute top-6 left-6 w-12 h-12 border-t-2 border-l-2 border-slate-800/80 rounded-tl-2xl" />
+                <div className="absolute top-6 right-6 w-12 h-12 border-t-2 border-r-2 border-slate-800/80 rounded-tr-2xl" />
+                <div className="absolute bottom-6 left-6 w-12 h-12 border-b-2 border-l-2 border-slate-800/80 rounded-bl-2xl" />
+                <div className="absolute bottom-6 right-6 w-12 h-12 border-b-2 border-r-2 border-slate-800/80 rounded-br-2xl" />
+
+                {/* Silhouette Outline Guide */}
+                <div
+                  className={`w-72 h-[75%] border-2 rounded-full flex flex-col items-center justify-between p-6 transition-all duration-500 ${
+                    stabilityTime >= 1.0 ? 'border-emerald-600/90 bg-emerald-500/15' : 'border-slate-800/60 bg-white/10'
+                  }`}
+                >
+                  <div className="w-16 h-16 rounded-full border border-slate-700/50 mt-4" />
+                  <div className="w-full border-t border-slate-700/40 my-auto" />
+                  <div className="text-[10px] font-mono font-bold text-slate-800 spatial-pill px-3 py-1 border border-white/80 shadow-xs">
+                    A-POSE ALIGNMENT
+                  </div>
+                </div>
+
+                {/* Active Floating Prompt */}
+                <div className="absolute bottom-8 spatial-glass px-6 py-3 rounded-full border border-white/90 flex items-center gap-3 shadow-xl">
+                  <Sparkles className="w-5 h-5 text-indigo-700 animate-spin" style={{ animationDuration: '4s' }} />
+                  <span className="text-sm font-bold text-slate-900 tracking-wide">
+                    {stabilityTime < 1.0 ? 'Hold pose steady inside outline...' : 'Pose locked! Keep still...'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Countdown Overlay */}
+              {countdown !== null && (
+                <div className="absolute inset-0 bg-white/70 backdrop-blur-md flex flex-col items-center justify-center z-30">
+                  <div className="text-9xl font-black text-slate-900 animate-ping">
+                    {countdown > 0 ? countdown : 'FLASH'}
+                  </div>
+                  <div className="text-xl font-extrabold text-slate-800 tracking-widest mt-6">CAPTURING FRAME</div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* MODE 3: DEMO MODELS */}
+          {activeMode === 'demo' && (
+            <div className="w-full h-full flex items-center justify-center p-6 animate-fade-in">
+              <img
+                src={demoImageUri}
+                alt="Demo Model Pose"
+                className="w-full h-full object-contain max-h-[75vh]"
+              />
+            </div>
+          )}
+
+          {/* Top Primary Navigation Bar */}
+          <div className="absolute top-6 left-6 z-20 flex flex-wrap items-center gap-2 max-w-[90%]">
+            <div className="flex items-center gap-1 spatial-glass p-1 rounded-full border border-white/90 shadow-md">
+              <button
+                onClick={() => {
+                  setActiveMode('camera');
+                  setUseWebcam(true);
+                }}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all ${
+                  activeMode === 'camera'
+                    ? 'spatial-pill-active border border-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Video className="w-3.5 h-3.5 text-slate-800" />
+                <span>Live Camera</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveMode('upload');
+                  setUseWebcam(false);
+                }}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all ${
+                  activeMode === 'upload'
+                    ? 'spatial-pill-active border border-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Upload Photo</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveMode('demo');
+                  setUseWebcam(false);
+                }}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all ${
+                  activeMode === 'demo'
+                    ? 'spatial-pill-active border border-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5 text-slate-700" />
+                <span>Demo Models</span>
+              </button>
+            </div>
+
+            {/* Sub-controls for Camera mode */}
+            {activeMode === 'camera' && useWebcam && (
+              <>
+                {videoDevices.length > 1 && (
+                  <div className="flex items-center gap-1.5 spatial-pill rounded-full px-3 py-1.5 border border-white/70 shadow-xs">
+                    <Settings2 className="w-3.5 h-3.5 text-slate-600" />
+                    <select
+                      value={selectedDeviceId}
+                      onChange={(e) => setSelectedDeviceId(e.target.value)}
+                      className="bg-transparent text-xs text-slate-800 outline-none cursor-pointer font-semibold"
+                    >
+                      {videoDevices.map((d) => (
+                        <option key={d.deviceId} value={d.deviceId} className="bg-white text-slate-900">
+                          {d.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setIsMirrored(!isMirrored)}
+                  className="px-3 py-1.5 rounded-full spatial-pill border border-white/70 text-xs font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-1.5 shadow-xs"
+                  title="Toggle Mirror Feed"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-slate-700" />
+                  <span>{isMirrored ? 'Mirrored' : 'Unmirrored'}</span>
+                </button>
+              </>
+            )}
+
+            {/* Sub-controls for Demo mode */}
+            {activeMode === 'demo' && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setDemoModel('male')}
+                  className={`px-3 py-1.5 rounded-full border text-xs font-bold transition-all ${
+                    demoModel === 'male'
+                      ? 'spatial-pill-active border-white text-slate-900 shadow-xs'
+                      : 'spatial-pill border-white/70 text-slate-700 hover:text-slate-900'
+                  }`}
+                >
+                  Male
+                </button>
+                <button
+                  onClick={() => setDemoModel('female')}
+                  className={`px-3 py-1.5 rounded-full border text-xs font-bold transition-all ${
+                    demoModel === 'female'
+                      ? 'spatial-pill-active border-white text-slate-900 shadow-xs'
+                      : 'spatial-pill border-white/70 text-slate-700 hover:text-slate-900'
+                  }`}
+                >
+                  Female
+                </button>
               </div>
             )}
-
-            {useWebcam && (
-              <button
-                onClick={() => setIsMirrored(!isMirrored)}
-                className="px-3 py-2 rounded-full spatial-pill border border-white/70 text-xs font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-1.5 shadow-xs"
-                title="Toggle Mirror Feed"
-              >
-                <RefreshCw className="w-3.5 h-3.5 text-slate-700" />
-                <span>{isMirrored ? 'Mirrored' : 'Unmirrored'}</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                setUseWebcam(false);
-                setDemoModel('male');
-              }}
-              className={`px-3.5 py-2 rounded-full border text-xs font-bold transition-all ${
-                !useWebcam && demoModel === 'male'
-                  ? 'spatial-pill-active border-white text-slate-900 shadow-xs'
-                  : 'spatial-pill border-white/70 text-slate-700 hover:text-slate-900'
-              }`}
-            >
-              Demo Model: Male
-            </button>
-
-            <button
-              onClick={() => {
-                setUseWebcam(false);
-                setDemoModel('female');
-              }}
-              className={`px-3.5 py-2 rounded-full border text-xs font-bold transition-all ${
-                !useWebcam && demoModel === 'female'
-                  ? 'spatial-pill-active border-white text-slate-900 shadow-xs'
-                  : 'spatial-pill border-white/70 text-slate-700 hover:text-slate-900'
-              }`}
-            >
-              Demo Model: Female
-            </button>
-
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2 rounded-full spatial-btn-glass text-xs font-bold text-slate-900 flex items-center gap-2 shadow-xs border border-white"
-            >
-              <Upload className="w-3.5 h-3.5 text-slate-700" />
-              <span>Upload Custom Photo</span>
-            </button>
           </div>
 
           {/* Camera Error / Warning Notice */}
@@ -431,8 +565,22 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({ onCaptured
               onClick={triggerCapture}
               className="w-full py-4 px-6 rounded-2xl spatial-btn-primary text-white font-bold tracking-wider flex items-center justify-center gap-3 shadow-xl active:scale-98"
             >
-              <Camera className="w-5 h-5" />
-              <span>CAPTURE STILL NOW</span>
+              {activeMode === 'upload' ? (
+                <>
+                  <Upload className="w-5 h-5 text-indigo-200" />
+                  <span>USE PHOTO FOR TRY-ON</span>
+                </>
+              ) : activeMode === 'demo' ? (
+                <>
+                  <UserCheck className="w-5 h-5 text-indigo-200" />
+                  <span>USE DEMO MODEL</span>
+                </>
+              ) : (
+                <>
+                  <Camera className="w-5 h-5" />
+                  <span>CAPTURE STILL NOW</span>
+                </>
+              )}
             </button>
 
             <button

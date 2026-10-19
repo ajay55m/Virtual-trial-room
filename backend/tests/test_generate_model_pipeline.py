@@ -139,7 +139,7 @@ class TestGenerateModelPipeline(unittest.TestCase):
             stage1 = messages[0]
             self.assertEqual(stage1["stage"], "POSE_EXTRACTION")
             self.assertEqual(stage1["progressPercent"], 25)
-            self.assertIn("mediapipe", stage1["logMessage"].lower())
+            self.assertTrue(any(k in stage1["logMessage"].lower() for k in ["mediapipe", "meta_sam", "sam"]))
 
             # Stage 2: DensePose UV Body Surface
             stage2 = messages[1]

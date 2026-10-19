@@ -40,3 +40,17 @@ public/assets/captures/
 *.njsproj
 *.sln
 *.sw?
+
+# Testing & MCP artifacts
+.playwright-mcp/
+backend/frontend/
+frontend/public/assets/test_*
+frontend/public/assets/head_*
+frontend/public/assets/precise_head_*
+frontend/public/assets/final_user_tryon_*
+frontend/public/assets/user_screenshot_view.jpg
+frontend/public/assets/crop_tshirt_zone.jpg
+frontend/public/assets/live_result_screenshot.png
+frontend/public/assets/final_person_fitted_showcase.png
+
+

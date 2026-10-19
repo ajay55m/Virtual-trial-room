@@ -172,6 +172,7 @@ export function App() {
 
         {currentState === 'RESULT' && (
           <ResultView
+            sessionId={sessionId}
             originalPhotoUri={capturedPhotoUri}
             tryonResultUri={tryonResultUri}
             sizeRecommendation={sizeRecommendation}

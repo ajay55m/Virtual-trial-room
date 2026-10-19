@@ -93,39 +93,39 @@ async def run_vton_pipeline_simulation(session_id: str, garment_id: str, selecte
     """Simulates multi-stage VTON async pipeline and streams WebSocket progress events."""
     job_id = f"job_{uuid.uuid4().hex[:8]}"
 
-    # Stage 1: Pose Extraction & Agnostic Masking
-    await asyncio.sleep(1.2)
+    # Stage 1: Meta SAM Segmentation & Agnostic Masking
+    await asyncio.sleep(1.0)
     await connection_manager.broadcast_progress(
         session_id=session_id,
         message=TryOnProgressMessage(
             jobId=job_id,
             stage="POSE_EXTRACTION",
             progressPercent=25,
-            logMessage="[POSE_WORKER] MediaPipe 33-point landmarks extracted. Generating human agnostic garment mask."
+            logMessage="[META_SAM] Segment Anything Model isolating clothing boundaries. Preserving head, neck, and limbs."
         )
     )
 
-    # Stage 2: DensePose UV Body Surface
-    await asyncio.sleep(1.2)
+    # Stage 2: Garment Agnostic Conditioning & DensePose UV Surface
+    await asyncio.sleep(1.1)
     await connection_manager.broadcast_progress(
         session_id=session_id,
         message=TryOnProgressMessage(
             jobId=job_id,
             stage="DENSEPOSE_SURFACE",
             progressPercent=50,
-            logMessage="[DENSEPOSE] Surface body parts parsed (torso, arms, legs). UV tensor alignment computed."
+            logMessage="[SAM_PARSER] Garment-agnostic representation constructed. DensePose UV body geometry aligned."
         )
     )
 
-    # Stage 3: PyTorch Diffusion Pass
-    await asyncio.sleep(1.5)
+    # Stage 3: IDM-VTON Diffusion UNet Inference Pass
+    await asyncio.sleep(1.4)
     await connection_manager.broadcast_progress(
         session_id=session_id,
         message=TryOnProgressMessage(
             jobId=job_id,
             stage="DIFFUSION_PASS",
             progressPercent=75,
-            logMessage="[DIFFUSERS] UNet FP16 inference pass executing: warping garment texture to body pose."
+            logMessage="[IDM_VTON] TryonNet cross-attention UNet diffusion mapping cloth texture, draping, and realistic creases."
         )
     )
 
@@ -155,7 +155,7 @@ async def run_vton_pipeline_simulation(session_id: str, garment_id: str, selecte
             jobId=job_id,
             stage="COMPLETED",
             progressPercent=100,
-            logMessage="[QUALITY_GATE] Face preservation similarity 0.942 > 0.75 threshold. Try-on generation complete!",
+            logMessage="[QUALITY_GATE] SAM segmentation & IDM-VTON synthesis verified. Return-reduction style advice ready!",
             resultImageUrl=result_img,
             sizeRecommendation=recommendation
         )
