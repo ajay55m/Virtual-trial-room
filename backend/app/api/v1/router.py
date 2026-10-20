@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import sessions, catalog, sizing, telemetry, ws, assistant
+from app.api.v1.endpoints import sessions, catalog, sizing, telemetry, ws, assistant, tryon
 
 api_router = APIRouter()
 
@@ -9,4 +9,6 @@ api_router.include_router(sizing.router, prefix="/sizing", tags=["3D Sizing Engi
 api_router.include_router(assistant.router, prefix="/assistant", tags=["Llama Style Assistant & SAM"])
 api_router.include_router(telemetry.router, prefix="/telemetry", tags=["Fleet Diagnostics"])
 api_router.include_router(ws.router, prefix="/sessions", tags=["WebSocket Stream"])
+api_router.include_router(tryon.router, prefix="/tryon", tags=["Photoreal VTON (Mode B)"])
+
 

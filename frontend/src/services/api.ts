@@ -43,6 +43,35 @@ export interface TryOnProgressEvent {
   error?: string;
 }
 
+export interface PhotorealTryonJob {
+  job_id: string;
+  status: 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  stage: string;
+  progress: number;
+  created_at: string;
+  updated_at: string;
+  result_url?: string;
+  error?: string;
+  provider?: string;
+  metrics?: {
+    face_similarity?: number;
+    latency_seconds?: number;
+    is_demo?: boolean;
+    [key: string]: any;
+  };
+  logs: string[];
+}
+
+export interface PhotorealTryonSubmitResponse {
+  job_id: string;
+  status: string;
+  poll_url: string;
+  created_at: string;
+  category: string;
+  provider: string;
+}
+
+
 export interface GarmentTuningOptions {
   offsetX?: number;      // delta in px (-80 to 80)
   offsetY?: number;      // delta in px (-80 to 80)
@@ -155,6 +184,50 @@ export const apiService = {
       };
     }
   },
+
+  /**
+   * Submits a photoreal virtual try-on job (Mode B) to POST /v1/tryon.
+   * Sends actual captured photo and flatlay garment.
+   */
+  async submitPhotorealTryon(
+    personBlob: Blob,
+    garmentId?: string,
+    garmentBlob?: Blob,
+    category: string = 'upper_body',
+    garmentDescription?: string,
+    provider?: string
+  ): Promise<PhotorealTryonSubmitResponse> {
+    const formData = new FormData();
+    formData.append('person_image', personBlob, 'capture.jpg');
+    if (garmentId) formData.append('garment_id', garmentId);
+    if (garmentBlob) formData.append('garment_image', garmentBlob, 'garment.png');
+    formData.append('category', category);
+    if (garmentDescription) formData.append('garment_description', garmentDescription);
+    if (provider) formData.append('provider', provider);
+
+    const res = await fetch(`${API_BASE}/tryon`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}: Try-on submission rejected`);
+    }
+    return await res.json();
+  },
+
+  /**
+   * Polls job status from GET /v1/tryon/{job_id}.
+   */
+  async pollTryonJob(jobId: string): Promise<PhotorealTryonJob> {
+    const res = await fetch(`${API_BASE}/tryon/${jobId}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}: Failed to poll try-on job`);
+    }
+    return await res.json();
+  },
+
 
   /**
    * Opens live WebSocket connection to stream inference steps from GPU worker / gateway.

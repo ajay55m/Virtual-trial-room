@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     HF_TOKEN: str = ""
     FAL_KEY: str = ""
     FASHN_API_KEY: str = ""
+    FACE_SIMILARITY_THRESHOLD: float = 0.55
+    TRYON_TIMEOUT_SECONDS: int = 120
+    DEMO_MODE: bool = False
 
     # CORS
     CORS_ORIGINS: Union[str, List[str]] = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
@@ -45,3 +48,4 @@ class Settings(BaseSettings):
         return v
 
 settings = Settings()
+

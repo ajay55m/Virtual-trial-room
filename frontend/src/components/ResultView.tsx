@@ -12,7 +12,6 @@ import {
   Download, 
   RefreshCw, 
   Eye, 
-  UserCheck, 
   Bot, 
   Sun, 
   Moon, 
@@ -21,6 +20,7 @@ import {
   SlidersHorizontal,
   Upload
 } from 'lucide-react';
+
 import type { Garment, SizeRecommendation } from '../types/kiosk';
 import { kioskAudio } from '../utils/audio';
 import { apiService, type GarmentTuningOptions } from '../services/api';

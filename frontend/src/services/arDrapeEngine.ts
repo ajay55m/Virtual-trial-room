@@ -56,10 +56,10 @@ class ARDrapeEngine {
   private metadataCache = new Map<string, GarmentAnchorMetadata>();
 
   // Telemetry rolling window
-  private lastFrameTime = performance.now();
   private frameCount = 0;
   private currentFps = 30;
   private lastFpsCalcTime = performance.now();
+
 
   /**
    * Resets the temporal smoothing filter (e.g. when shopper steps away or camera changes).
@@ -259,9 +259,9 @@ class ARDrapeEngine {
       this.frameCount = 0;
       this.lastFpsCalcTime = now;
     }
-    this.lastFrameTime = now;
 
     const transform = this.computeDrapeTransform(
+
       landmarks,
       meta,
       img,

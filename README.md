@@ -172,6 +172,50 @@ A real-time, hardware-accelerated AR clothing drape pipeline running at **~30–
 
 ---
 
+## 🎨 Mode B: Photoreal Virtual Try-On (Phase 4 Implemented)
+
+A photoreal virtual try-on engine for captured stills, replacing pre-rendered static mockups with real generative diffusion and automated identity preservation:
+
+### 1. 4-Stage Production Pipeline
+1. **Validated Still Input:** Verifies capture resolution and single-person framing from Phase 1.
+2. **Garment-Agnostic Masking:** Generates semantic body masks preserving face, neck, arms, and lower body while erasing target clothing regions.
+3. **Real VTON Model Dispatch:** Routes through the uniform `TryOnProvider` interface (`try_on(person_image_bytes, garment_image_bytes, category) -> TryOnResult`).
+4. **Face Identity Verification Gate:** Extracts face patches and computes SSIM luminance + multi-channel histogram correlation. Automatically rejects outputs with `FaceIdentityMismatchError` if identity similarity falls below the configurable threshold (`FACE_SIMILARITY_THRESHOLD = 0.55`).
+
+### 2. Available Providers & Commercial Licensing Assessment
+| Provider | Underlying Model | License | Commercial Retail Use? | Hardware Required |
+| :--- | :--- | :--- | :--- | :--- |
+| **FASHN.ai** | MMDiT Pixel-Space | **Apache-2.0** | **YES &mdash; Fully Allowed** | Cloud REST API / ~8-12 GB VRAM |
+| **Hugging Face IDM-VTON** | SDXL + TryonNet | **CC BY-NC-SA 4.0** | **NO &mdash; Non-Commercial** | Cloud ZeroGPU / 16–24 GB VRAM |
+| **Fal.ai CatVTON** | Concatenation SD 1.5 | **CC BY-NC-SA 4.0** | **NO &mdash; Non-Commercial** | Cloud API / ~8–12 GB VRAM |
+
+### 3. GPU Hardware & Environment Requirements
+- **Local Self-Hosted Inference:** Requires an NVIDIA GPU with at least **16 GB to 24 GB of VRAM** (e.g., NVIDIA RTX 3090, 4090, A10G, or L4) running CUDA 12+.
+- **Edge Kiosks & Laptops (e.g. 4 GB RTX 2050):** Offload VTON inference to cloud APIs (Hugging Face ZeroGPU, Fal.ai, or FASHN.ai) to prevent CUDA Out-of-Memory (OOM) failures.
+- **Environment Configuration (`backend/.env`):**
+  ```env
+  TRYON_PROVIDER=huggingface    # Options: huggingface, fal, fashn
+  HF_TOKEN=hf_...               # Hugging Face User Access Token
+  FAL_KEY=fal_sk_...            # Optional: Fal.ai API Key
+  FASHN_API_KEY=...             # Optional: FASHN Commercial API Key
+  FACE_SIMILARITY_THRESHOLD=0.55
+  DEMO_MODE=false               # Strict Anti-Mock: false returns real errors on failure
+  ```
+
+### 4. Asynchronous REST Endpoints
+- **`POST /v1/tryon`**: Accepts `person_image` (multipart upload) and `garment_id` (or custom `garment_image`). Enqueues background job and returns HTTP `202 Accepted` with `job_id` and `poll_url`.
+- **`GET /v1/tryon/{job_id}`**: Returns real-time status (`QUEUED`, `PROCESSING`, `COMPLETED`, `FAILED`), current stage, live worker logs, face similarity metrics, and signed `result_url`.
+- **Anti-Mock Guarantee:** Zero silent fallbacks to static images. If an inference fails or face identity drifts, the API and kiosk UI present a transparent error screen with failure details and a retry action.
+
+### 5. Automated Verification
+Run the comprehensive Phase 4 verification suite:
+```bash
+python scripts/test_tryon_pipeline.py
+```
+*Verifies provider interfaces, mask generation, face identity gate, anti-mock error handling, sleeve placement, and asynchronous FastAPI polling endpoints (6/6 tests passing).*
+
+---
+
 ## 🔒 Security & Ephemeral Privacy
 
 All captured user stills, intermediate keypoint arrays, and segmentation masks are held temporarily in encrypted object storage (MinIO) with a **hard 15-minute TTL limit**. 
@@ -183,3 +227,4 @@ Relational PostgreSQL databases store **zero personal photos or biometric templa
 ## 📜 License
 
 Distributed under the MIT License. See `LICENSE` for more information.
+

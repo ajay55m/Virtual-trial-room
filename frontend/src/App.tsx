@@ -171,8 +171,10 @@ export function App() {
             garment={selectedGarment}
             selectedSize={selectedSize}
             onComplete={handleGenerationComplete}
+            onCancel={() => setCurrentState('CATALOG')}
           />
         )}
+
 
         {currentState === 'RESULT' && (
           <ResultView
