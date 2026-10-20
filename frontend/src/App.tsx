@@ -14,12 +14,16 @@ import { AdminModal } from './components/AdminModal';
 import { apiService } from './services/api';
 
 export function App() {
-  const [currentState, setCurrentState] = useState<KioskState>('IDLE');
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const initialScreen = (urlParams?.get('screen')?.toUpperCase() as KioskState) || 'IDLE';
+  const initialResult = urlParams?.get('result') || '/assets/captures/job_vton_c5f0b4019d_tryon.jpg';
+
+  const [currentState, setCurrentState] = useState<KioskState>(initialScreen);
   const [sessionId, setSessionId] = useState<string>('');
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
-  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string>('/assets/virtualfit_model_tshirt.jpg');
-  const [tryonResultUri, setTryonResultUri] = useState<string>('');
+  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string>('/assets/demo_person_male.jpg');
+  const [tryonResultUri, setTryonResultUri] = useState<string>(initialScreen === 'RESULT' ? initialResult : '');
   const [sizeRecommendation, setSizeRecommendation] = useState<any>(null);
   const [poseMetrics, setPoseMetrics] = useState<PoseQualityMetrics>({
     sharpnessVariance: 420,

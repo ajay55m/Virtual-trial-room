@@ -1,9 +1,12 @@
+import os
 from typing import List, Union
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+ENV_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(env_file=(ENV_PATH, ".env"), case_sensitive=True, extra="ignore")
 
     PROJECT_NAME: str = "AURA Virtual Fitting Room Gateway"
     API_V1_STR: str = "/v1"
