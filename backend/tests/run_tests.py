@@ -86,8 +86,9 @@ def run_integration_audit():
             "Generative Model",
             "3D Sizing & Honesty Rule Engine",
             "INTEGRATED",
-            "SMPL proxy regression with fitClass & Honesty Rule discrepancy alerts",
+            "Landmark & height proportional regression with fitClass & Honesty Rule discrepancy alerts",
         ),
+
         (
             "Generative Model",
             "Facial Identity Quality Gate",

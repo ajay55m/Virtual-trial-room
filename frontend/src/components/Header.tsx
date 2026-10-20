@@ -62,11 +62,12 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="h-6 w-[1px] bg-slate-400/30" />
 
-        <div className="flex items-center gap-2 spatial-pill px-3.5 py-1 text-xs font-semibold text-emerald-800 bg-emerald-500/10 border-emerald-500/30 shadow-xs">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="tracking-wide">mTLS ENCRYPTED</span>
+        <div className="flex items-center gap-2 spatial-pill px-3.5 py-1 text-xs font-semibold text-indigo-900 bg-indigo-500/10 border-indigo-500/20 shadow-xs">
+          <span className="w-2 h-2 rounded-full bg-indigo-500" />
+          <span className="tracking-wide">EPHEMERAL SESSION (15M TTL)</span>
         </div>
       </div>
+
 
       {/* State Badge & Inactivity Warning */}
       <div className="flex items-center gap-4">

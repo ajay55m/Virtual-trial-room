@@ -14,20 +14,22 @@
 The **AURA Virtual Fitting Room Kiosk System** is an in-store hardware-software solution enabling shoppers to visually try on garments photorealistically via GPU-accelerated Virtual Try-On (VTON) diffusion models and receive data-backed size recommendations—without changing rooms or pre-existing 3D garment assets from brands.
 
 ```
-[ Touch Kiosk UI ] ➔ [ MediaPipe Edge Vision ] ➔ [ FastAPI Gateway ] ➔ [ PyTorch VTON Worker ]
+[ Touch Kiosk UI ] ➔ [ MediaPipe Edge Vision ] ➔ [ FastAPI Gateway ] ➔ [ Cloud VTON Inference ]
          │                        │                     │                      │
-   (Touch State)           (Pose Validation)       (mTLS Auth & WS)         (CatVTON / IDM-VTON)
+   (Touch State)           (Pose Validation)      (Session Auth & WS)    (IDM-VTON / Fal / FASHN)
 ```
 
 ---
 
 ## 🚀 Key Features
 
-* **Guided Edge Vision Capture:** MediaPipe Tasks Vision (`@mediapipe/tasks-vision`) Web Worker evaluating pose compliance (33 landmarks, A-pose, bounding height 70-90%, yaw < 10°, single person check, Laplacian sharpness variance).
-* **Photorealistic AI VTON Pipeline:** PyTorch CatVTON / IDM-VTON model adapters with FP16 UNet inference pass, DensePose surface mapping, and identity preservation quality gate.
-* **Precision Measurement & Sizing Engine:** SMPL body shape regression estimating chest, waist, hips, shoulder, and height circumferences matched against brand size charts, enforcing an **Honesty Rule alert** if fit differs from visual render.
-* **100% Ephemeral Privacy Compliance:** Ephemeral storage lifecycle with a **hard 15-minute TTL purge** (GDPR / BIPA compliant). Relational database stores zero user imagery.
-* **Luxury Kiosk UI & Web Audio Feedback:** Dark glassmorphism interface tailored for touch displays with procedural sci-fi audio feedback powered by Web Audio API.
+* **Guided Edge Vision Capture:** MediaPipe Tasks Vision (`@mediapipe/tasks-vision`) client evaluating pose compliance (33 landmarks, A-pose, distance bounding, alignment tilt, single person check, and contrast).
+* **Mode A: Live AR Drape Engine:** Hardware-accelerated affine landmark clothing drape running at 30–60 fps with Exponential Moving Average (EMA) temporal smoothing filter.
+* **Mode B: Photoreal Generative VTON:** Real diffusion try-on pipeline with garment-agnostic semantic masking and automated face identity preservation verification gate.
+* **Proportional Measurement & Sizing Ranges:** Estimates realistic body circumference ranges (chest, waist, hips) from detected 2D landmarks and user height, enforcing honest uncertainty ranges rather than unbacked SMPL claims.
+* **100% Ephemeral Privacy Compliance:** Ephemeral storage lifecycle with a **hard 15-minute TTL purge** (GDPR compliant). Relational database stores zero user imagery.
+* **Luxury Kiosk UI & Web Audio Feedback:** Dark glassmorphism interface tailored for touch displays with procedural audio feedback powered by Web Audio API.
+
 * **Fleet Diagnostics Dashboard:** Integrated telemetry modal monitoring GPU VRAM memory, Celery Redis queue depth, OpenAPI contract validation, and data purge reconciliation logs.
 
 ---

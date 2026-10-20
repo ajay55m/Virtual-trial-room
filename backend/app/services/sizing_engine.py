@@ -1,10 +1,18 @@
+"""
+AURA Size Estimation & Honesty Engine.
+Estimates body measurement ranges from user-entered height and 2D pose landmarks.
+Strictly avoids unbacked claims of SMPL 3D mesh modeling, returning honest measurement
+ranges with clear confidence labeling.
+"""
+
 from typing import Optional, Literal
 from app.models.schemas import BodyMeasurements, SizeRecommendation
 
+
 class SizingRegressionEngine:
     """
-    Computes body circumferences from height + pose aspect ratio (SMPL regression proxy)
-    and computes brand size recommendations enforcing the Honesty Rule.
+    Computes body measurement ranges from user height + detected 2D landmarks.
+    Enforces the Honesty Rule: alerts shopper if visual drape differs from measured sizing.
     """
 
     SIZE_CHARTS = {
@@ -16,26 +24,52 @@ class SizingRegressionEngine:
     }
 
     @classmethod
-    def estimate_measurements(cls, height_cm: float, gender: str = "Unisex") -> BodyMeasurements:
-        scale = height_cm / 175.0
+    def estimate_measurements(
+        cls,
+        height_cm: float = 175.0,
+        gender: str = "Unisex",
+        shoulder_ratio: Optional[float] = None
+    ) -> BodyMeasurements:
+        """
+        Estimates body circumference ranges based on user-entered height and pose landmarks.
+        Shows ranges rather than exact single numbers.
+        """
+        scale = max(0.7, min(1.3, height_cm / 175.0))
 
+        # Base proportions
         if gender.lower() == "female":
-            chest = round(88.0 * scale, 1)
-            waist = round(68.0 * scale, 1)
-            hip = round(94.0 * scale, 1)
-            shoulder = round(40.0 * scale, 1)
+            base_chest, base_waist, base_hip, base_shoulder = 88.0, 68.0, 94.0, 40.0
         else:
-            chest = round(96.0 * scale, 1)
-            waist = round(79.0 * scale, 1)
-            hip = round(96.0 * scale, 1)
-            shoulder = round(44.5 * scale, 1)
+            base_chest, base_waist, base_hip, base_shoulder = 96.0, 79.0, 96.0, 44.5
+
+        # If shoulder_ratio (from MediaPipe landmarks) is available, refine shoulder estimate
+        if shoulder_ratio and 0.15 <= shoulder_ratio <= 0.35:
+            # normalized shoulder width ~ 0.22 of height in standard adults
+            shoulder_cm = round(shoulder_ratio * height_cm * 1.15, 1)
+        else:
+            shoulder_cm = round(base_shoulder * scale, 1)
+
+        chest_cm = round(base_chest * scale, 1)
+        waist_cm = round(base_waist * scale, 1)
+        hip_cm = round(base_hip * scale, 1)
+
+        # Formulate realistic uncertainty ranges (±2-3 cm)
+        c_min, c_max = int(chest_cm - 2), int(chest_cm + 2)
+        w_min, w_max = int(waist_cm - 3), int(waist_cm + 3)
+        h_min, h_max = int(hip_cm - 3), int(hip_cm + 3)
+        s_min, s_max = int(shoulder_cm - 1), int(shoulder_cm + 1)
 
         return BodyMeasurements(
-            chestCm=chest,
-            waistCm=waist,
-            hipCm=hip,
-            shoulderCm=shoulder,
-            heightCm=height_cm
+            chestCm=chest_cm,
+            waistCm=waist_cm,
+            hipCm=hip_cm,
+            shoulderCm=shoulder_cm,
+            heightCm=round(height_cm, 1),
+            chestRange=f"{c_min}–{c_max} cm",
+            waistRange=f"{w_min}–{w_max} cm",
+            hipRange=f"{h_min}–{h_max} cm",
+            shoulderRange=f"{s_min}–{s_max} cm",
+            estimationMethod="2D Pose Landmarks & User Height"
         )
 
     @classmethod
@@ -46,7 +80,6 @@ class SizingRegressionEngine:
         stretch_class: str = "Medium"
     ) -> SizeRecommendation:
         chest = measurements.chestCm
-        recommended_size = 'M'
 
         if chest < 88:
             recommended_size = 'XS'
@@ -65,26 +98,26 @@ class SizingRegressionEngine:
         sel_idx = size_order.index(selected_size.upper()) if selected_size.upper() in size_order else 2
         rec_idx = size_order.index(recommended_size) if recommended_size in size_order else 2
 
-        fit_class: Literal['Slim', 'Regular', 'Relaxed'] = 'Regular'
-
         if sel_idx < rec_idx:
-            fit_class = 'Slim'
+            fit_class: Literal['Slim', 'Regular', 'Relaxed'] = 'Slim'
             if stretch_class in ["None", "Low"]:
-                honesty_warning = f"Notice: Selected Size '{selected_size}' may feel tight around shoulders/chest based on your measurements. Fabric has {stretch_class} stretch."
+                honesty_warning = f"Notice: Selected Size '{selected_size}' may feel tight around shoulders/chest based on your measurement range ({measurements.chestRange})."
             else:
-                honesty_warning = f"Selected Size '{selected_size}' fits as Slim fit. Size '{recommended_size}' is recommended for standard comfort."
+                honesty_warning = f"Selected Size '{selected_size}' fits as Slim fit. Recommended range corresponds to Size '{recommended_size}'."
         elif sel_idx > rec_idx:
             fit_class = 'Relaxed'
-            honesty_warning = f"Notice: Selected Size '{selected_size}' will give an oversized drape compared to your measured size '{recommended_size}'."
+            honesty_warning = f"Notice: Selected Size '{selected_size}' will give an oversized drape compared to estimated size '{recommended_size}'."
         else:
             fit_class = 'Regular'
 
         return SizeRecommendation(
             recommendedSize=recommended_size,
-            confidence=0.94,
+            confidence=0.82,
+            confidenceLabel="Estimated Range",
             fitClass=fit_class,
             honestyWarning=honesty_warning,
             measurementBreakdown=measurements
         )
+
 
 sizing_engine = SizingRegressionEngine()

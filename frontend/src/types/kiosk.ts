@@ -54,15 +54,22 @@ export interface BodyMeasurements {
   hipCm: number;
   shoulderCm: number;
   heightCm: number;
+  chestRange?: string;
+  waistRange?: string;
+  hipRange?: string;
+  shoulderRange?: string;
+  estimationMethod?: string;
 }
 
 export interface SizeRecommendation {
   recommendedSize: string;
-  confidence: number; // e.g. 0.94
+  confidence: number; // e.g. 0.82
+  confidenceLabel?: string; // e.g. "Estimated Range"
   fitClass: 'Slim' | 'Regular' | 'Relaxed';
   honestyWarning?: string; // Honesty rule alert if size fit differs from visual image
   measurementBreakdown: BodyMeasurements;
 }
+
 
 export interface PoseQualityMetrics {
   sharpnessVariance: number;

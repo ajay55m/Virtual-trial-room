@@ -37,13 +37,20 @@ class BodyMeasurements(BaseModel):
     hipCm: float
     shoulderCm: float
     heightCm: float
+    chestRange: Optional[str] = None
+    waistRange: Optional[str] = None
+    hipRange: Optional[str] = None
+    shoulderRange: Optional[str] = None
+    estimationMethod: str = "2D Pose Landmarks & User Height"
 
 class SizeRecommendation(BaseModel):
     recommendedSize: str
     confidence: float
+    confidenceLabel: str = "Estimated Range"
     fitClass: Literal['Slim', 'Regular', 'Relaxed']
     honestyWarning: Optional[str] = None
     measurementBreakdown: BodyMeasurements
+
 
 # Pose Quality Verification
 class PoseQualityMetrics(BaseModel):

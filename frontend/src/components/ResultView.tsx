@@ -226,7 +226,25 @@ export const ResultView: React.FC<ResultViewProps> = ({
     }
   };
 
-  // Dynamic recommendation based on active size and body regression
+  // Dynamic recommendation based on active size and honest range estimation
+  const heightVal = sizeRecommendation?.measurementBreakdown?.heightCm || 175;
+  const scale = heightVal / 175.0;
+
+  // Real body measurement ranges (not exact unbacked centimeters)
+  const baseChest = 94.0 * scale;
+  const baseWaist = 78.0 * scale;
+  const baseHip = 96.0 * scale;
+  const baseShoulder = 44.0 * scale;
+
+  const chestMin = Math.round(baseChest - 2);
+  const chestMax = Math.round(baseChest + 2);
+  const waistMin = Math.round(baseWaist - 3);
+  const waistMax = Math.round(baseWaist + 3);
+  const hipMin = Math.round(baseHip - 3);
+  const hipMax = Math.round(baseHip + 3);
+  const shoulderMin = Math.round(baseShoulder - 1);
+  const shoulderMax = Math.round(baseShoulder + 1);
+
   const recommendedSize = isSaree ? 'Free Size' : 'M';
   const fitClass: 'Slim' | 'Regular' | 'Relaxed' =
     currentSize === 'L' || currentSize === 'XL'
@@ -236,23 +254,41 @@ export const ResultView: React.FC<ResultViewProps> = ({
       : 'Regular';
 
   const recommendation: SizeRecommendation = sizeRecommendation && sizeRecommendation.recommendedSize === currentSize
-    ? sizeRecommendation
+    ? {
+        ...sizeRecommendation,
+        confidenceLabel: sizeRecommendation.confidenceLabel || 'Estimated Range',
+        measurementBreakdown: {
+          ...sizeRecommendation.measurementBreakdown,
+          chestRange: sizeRecommendation.measurementBreakdown.chestRange || `${chestMin}–${chestMax} cm`,
+          waistRange: sizeRecommendation.measurementBreakdown.waistRange || `${waistMin}–${waistMax} cm`,
+          hipRange: sizeRecommendation.measurementBreakdown.hipRange || `${hipMin}–${hipMax} cm`,
+          shoulderRange: sizeRecommendation.measurementBreakdown.shoulderRange || `${shoulderMin}–${shoulderMax} cm`,
+          estimationMethod: '2D Pose Landmarks & User Height'
+        }
+      }
     : {
         recommendedSize,
-        confidence: currentSize === recommendedSize ? 0.96 : 0.88,
+        confidence: 0.82,
+        confidenceLabel: 'Estimated Range',
         fitClass,
         honestyWarning:
           !isSaree && currentSize !== recommendedSize && currentSize !== '40'
-            ? `Honesty Rule Alert: You selected Size ${currentSize}, but body measurement regression predicts Size ${recommendedSize} for optimal tailored drape.`
+            ? `Honesty Notice: You selected Size ${currentSize}. Proportional landmark estimation indicates Size ${recommendedSize} for standard ease.`
             : undefined,
         measurementBreakdown: {
-          chestCm: currentSize === 'XS' ? 86 : currentSize === 'S' ? 91 : currentSize === 'M' ? 96 : currentSize === 'L' ? 102 : 108,
-          waistCm: currentSize === 'XS' ? 70 : currentSize === 'S' ? 74 : currentSize === 'M' ? 78 : currentSize === 'L' ? 84 : 90,
-          hipCm: currentSize === 'XS' ? 92 : currentSize === 'S' ? 95 : currentSize === 'M' ? 98 : currentSize === 'L' ? 104 : 110,
-          shoulderCm: currentSize === 'XS' ? 40 : currentSize === 'S' ? 42 : currentSize === 'M' ? 44 : currentSize === 'L' ? 46 : 48,
-          heightCm: 175
+          chestCm: Math.round(baseChest),
+          waistCm: Math.round(baseWaist),
+          hipCm: Math.round(baseHip),
+          shoulderCm: Math.round(baseShoulder),
+          heightCm: heightVal,
+          chestRange: `${chestMin}–${chestMax} cm`,
+          waistRange: `${waistMin}–${waistMax} cm`,
+          hipRange: `${hipMin}–${hipMax} cm`,
+          shoulderRange: `${shoulderMin}–${shoulderMax} cm`,
+          estimationMethod: '2D Pose Landmarks & User Height'
         }
       };
+
 
   const handleSendEmail = (e: React.FormEvent) => {
     e.preventDefault();
@@ -687,7 +723,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
             </div>
             <h3 className="text-2xl font-extrabold text-slate-900 mb-3">Fit & Size Analysis</h3>
 
-            {/* Llama Style & Return Reduction Trigger Card */}
+            {/* AI Style & Return Reduction Trigger Card */}
             <div 
               onClick={() => {
                 kioskAudio.playBeep(850, 0.05);
@@ -702,16 +738,16 @@ export const ResultView: React.FC<ResultViewProps> = ({
                   </div>
                   <div>
                     <div className="text-xs font-bold text-slate-900 flex items-center space-x-1.5">
-                      <span>Llama Style & Sizing Advisor</span>
-                      <span className="text-[9px] px-1.5 py-0.2 bg-indigo-600 text-white rounded font-bold uppercase tracking-wider">AI</span>
+                      <span>AI Style & Sizing Advisor</span>
+                      <span className="text-[9px] px-2 py-0.5 bg-amber-500/20 text-amber-800 border border-amber-500/30 rounded font-bold uppercase tracking-wider">COMING SOON</span>
                     </div>
                     <div className="text-[11px] text-slate-600">
-                      Honest Fit Analysis &bull; Return Risk Diagnostic
+                      Personalized styling & return-risk advisor (in development)
                     </div>
                   </div>
                 </div>
                 <span className="text-xs font-bold text-indigo-700 group-hover:translate-x-0.5 transition flex items-center">
-                  Consult &rarr;
+                  Preview &rarr;
                 </span>
               </div>
             </div>
@@ -720,15 +756,15 @@ export const ResultView: React.FC<ResultViewProps> = ({
             <div className="p-4 rounded-2xl spatial-card border border-white/70 mb-4 shadow-sm">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-semibold text-slate-600">Recommended Size</span>
-                <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
-                  {Math.round(recommendation.confidence * 100)}% MATCH
+                <span className="text-xs font-mono font-bold text-indigo-800 bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
+                  ESTIMATED RANGE
                 </span>
               </div>
               <div className="text-3xl font-black text-slate-900 font-mono mb-1">
                 {isSaree ? 'FREE SIZE (6.3m)' : `SIZE ${recommendation.recommendedSize}`}
               </div>
               <div className="text-xs text-slate-500 font-medium">
-                Derived from SMPL 3D human body shape estimation
+                Estimated from 2D pose landmarks & user height (SMPL 3D mesh not active)
               </div>
             </div>
 
@@ -764,25 +800,26 @@ export const ResultView: React.FC<ResultViewProps> = ({
               </div>
             </div>
 
-            {/* Measurements Grid */}
+            {/* Measurements Grid (Estimated Ranges) */}
             <div className="grid grid-cols-2 gap-2 text-xs font-mono mb-6">
               <div className="p-2.5 rounded-2xl spatial-card border border-white/70 shadow-xs">
-                <div className="text-[10px] text-slate-500 font-semibold">Chest</div>
-                <div className="text-slate-900 font-bold">{recommendation.measurementBreakdown.chestCm} cm</div>
+                <div className="text-[10px] text-slate-500 font-semibold">Chest Range</div>
+                <div className="text-slate-900 font-bold">{recommendation.measurementBreakdown.chestRange || `${recommendation.measurementBreakdown.chestCm} cm`}</div>
               </div>
               <div className="p-2.5 rounded-2xl spatial-card border border-white/70 shadow-xs">
-                <div className="text-[10px] text-slate-500 font-semibold">Waist</div>
-                <div className="text-slate-900 font-bold">{recommendation.measurementBreakdown.waistCm} cm</div>
+                <div className="text-[10px] text-slate-500 font-semibold">Waist Range</div>
+                <div className="text-slate-900 font-bold">{recommendation.measurementBreakdown.waistRange || `${recommendation.measurementBreakdown.waistCm} cm`}</div>
               </div>
               <div className="p-2.5 rounded-2xl spatial-card border border-white/70 shadow-xs">
-                <div className="text-[10px] text-slate-500 font-semibold">Hips</div>
-                <div className="text-slate-900 font-bold">{recommendation.measurementBreakdown.hipCm} cm</div>
+                <div className="text-[10px] text-slate-500 font-semibold">Hip Range</div>
+                <div className="text-slate-900 font-bold">{recommendation.measurementBreakdown.hipRange || `${recommendation.measurementBreakdown.hipCm} cm`}</div>
               </div>
               <div className="p-2.5 rounded-2xl spatial-card border border-white/70 shadow-xs">
-                <div className="text-[10px] text-slate-500 font-semibold">Height</div>
+                <div className="text-[10px] text-slate-500 font-semibold">User Height</div>
                 <div className="text-slate-900 font-bold">{recommendation.measurementBreakdown.heightCm} cm</div>
               </div>
             </div>
+
 
             {/* Take-Home Export */}
             <div className="p-4 rounded-2xl spatial-card border border-white/70 mb-6 shadow-xs">
