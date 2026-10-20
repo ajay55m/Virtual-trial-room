@@ -19,6 +19,11 @@ The **AURA Virtual Fitting Room Kiosk System** is an in-store hardware-software 
    (Touch State)           (Pose Validation)      (Session Auth & WS)    (IDM-VTON / Fal / FASHN)
 ```
 
+> [!NOTE]
+> For the comprehensive engineering audit and benchmark reports, see:
+> - **[Architectural & Codebase Audit (`AUDIT.md`)](AUDIT.md)**: Breakdown of legacy 21% coordinate bug, asset analysis, and fake badge audit.
+> - **[System Benchmark & Evaluation Report (`RESULTS.md`)](RESULTS.md)**: 5-subject x 5-garment evaluation matrix, Mode A FPS/latency benchmarks, Mode B face preservation gate results, and production licensing/cost breakdown.
+
 ---
 
 ## 🚀 Key Features

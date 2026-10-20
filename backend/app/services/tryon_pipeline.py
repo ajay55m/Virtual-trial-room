@@ -54,21 +54,21 @@ def detect_face_box(img: Image.Image) -> Tuple[int, int, int, int]:
         ((r - g) > 8) & ((r - g) < 85)
     )
 
-    # Focus face search on upper 45% of image
-    search_h = int(h * 0.45)
+    # Focus face search on upper 40% of image
+    search_h = int(h * 0.40)
     skin_upper = skin[:search_h, :]
 
     y_idx, x_idx = np.where(skin_upper)
     if len(y_idx) > 80:
         cx = int(np.median(x_idx))
-        cy = int(np.median(y_idx))
+        cy = int(np.percentile(y_idx, 40)) # Center precisely on facial features (eyes/nose)
     else:
         # Fallback to standard human portrait center
         cx = int(w * 0.50)
-        cy = int(h * (0.28 if is_landscape else 0.18))
+        cy = int(h * (0.24 if is_landscape else 0.16))
 
-    box_w = int(min(w, h) * (0.26 if is_landscape else 0.30))
-    box_h = int(box_w * 1.25)
+    box_w = int(min(w, h) * (0.22 if is_landscape else 0.24))
+    box_h = int(box_w * 1.15)
 
     x1 = max(0, cx - box_w // 2)
     y1 = max(0, cy - box_h // 2)
