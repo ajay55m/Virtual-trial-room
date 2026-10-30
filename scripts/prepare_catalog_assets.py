@@ -79,7 +79,7 @@ def center_white_tshirt():
     min_y, max_y = np.min(y_ind), np.max(y_ind)
     
     # Crop to subject bounding box
-    cropped = im.crop((min_x, min_y, max_x, max_y))
+    cropped = im.crop((int(min_x), int(min_y), int(max_x), int(max_y)))
     
     # Center on fresh 1024x1024 canvas with 8% top padding
     canvas = Image.new('RGBA', (1024, 1024), (0, 0, 0, 0))

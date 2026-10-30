@@ -10,13 +10,14 @@ import { CatalogView } from './components/CatalogView';
 import { GeneratingPipeline } from './components/GeneratingPipeline';
 import { ResultView } from './components/ResultView';
 import { AdminModal } from './components/AdminModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 import { apiService } from './services/api';
 
 export function App() {
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const initialScreen = (urlParams?.get('screen')?.toUpperCase() as KioskState) || 'IDLE';
-  const initialResult = urlParams?.get('result') || '/assets/captures/job_vton_c5f0b4019d_tryon.jpg';
+  const initialResult = urlParams?.get('result') || '/assets/captures/perfect_user_tryon.jpg';
 
   const [currentState, setCurrentState] = useState<KioskState>(initialScreen);
   const [sessionId, setSessionId] = useState<string>('');
@@ -62,6 +63,50 @@ export function App() {
       window.removeEventListener('touchstart', resetInactivity);
       window.removeEventListener('click', resetInactivity);
     };
+  }, [currentState]);
+
+  // Retail Hardware RFID & Barcode Scanner Listener (USB Keyboard Wedge)
+  useEffect(() => {
+    let buffer = '';
+    let lastKeyTime = performance.now();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept if user is typing in form inputs (like email box)
+      const targetTag = (e.target as HTMLElement)?.tagName;
+      if (targetTag === 'INPUT' || targetTag === 'TEXTAREA') return;
+
+      const now = performance.now();
+      // Hardware barcode scanners burst characters within < 60ms
+      if (now - lastKeyTime > 120) {
+        buffer = '';
+      }
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        const query = buffer.trim().toLowerCase();
+        buffer = '';
+        if (query.length >= 3) {
+          const matched = MOCK_GARMENTS.find(g => 
+            g.sku.toLowerCase() === query ||
+            g.id.toLowerCase() === query ||
+            g.name.toLowerCase().includes(query)
+          );
+          if (matched) {
+            setSelectedGarment(matched);
+            if (currentState === 'IDLE') {
+              handleStartSession();
+            } else if (currentState === 'CATALOG') {
+              handleSelectGarment(matched, 'M');
+            }
+          }
+        }
+      } else if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentState]);
 
   const handleStartSession = () => {
@@ -140,58 +185,62 @@ export function App() {
 
       {/* Main Kiosk Screen Viewport */}
       <main className="flex-1 relative w-full h-full overflow-y-auto">
-        {currentState === 'IDLE' && (
-          <IdleScreen onStart={handleStartSession} />
-        )}
+        <ErrorBoundary onReset={handleResetSession}>
+          {currentState === 'IDLE' && (
+            <IdleScreen onStart={handleStartSession} />
+          )}
 
-        {currentState === 'POSITIONING' && (
-          <PositioningCamera
-            onCaptured={handlePhotoCaptured}
-            onCancel={handleResetSession}
-            category={selectedGarment?.category || 'Upper'}
-            initialGarment={selectedGarment}
-            onSelectGarment={setSelectedGarment}
-          />
-        )}
+          {currentState === 'POSITIONING' && (
+            <PositioningCamera
+              onCaptured={handlePhotoCaptured}
+              onCancel={handleResetSession}
+              category={selectedGarment?.category || 'Upper'}
+              initialGarment={selectedGarment}
+              onSelectGarment={setSelectedGarment}
+            />
+          )}
 
-        {currentState === 'REVIEW' && (
-          <ReviewScreen
-            photoUri={capturedPhotoUri}
-            metrics={poseMetrics}
-            onConfirm={handleReviewConfirm}
-            onRetake={() => setCurrentState('POSITIONING')}
-            onUploadNew={(newUri) => handlePhotoCaptured(newUri, poseMetrics)}
-          />
-        )}
+          {currentState === 'REVIEW' && (
+            <ReviewScreen
+              photoUri={capturedPhotoUri}
+              metrics={poseMetrics}
+              onConfirm={handleReviewConfirm}
+              onRetake={() => setCurrentState('POSITIONING')}
+              onUploadNew={(newUri) => handlePhotoCaptured(newUri, poseMetrics)}
+            />
+          )}
 
-        {currentState === 'CATALOG' && (
-          <CatalogView onSelectGarment={handleSelectGarment} />
-        )}
+          {currentState === 'CATALOG' && (
+            <CatalogView
+              onSelectGarment={handleSelectGarment}
+              userPhotoUri={capturedPhotoUri}
+            />
+          )}
 
-        {currentState === 'GENERATING' && (
-          <GeneratingPipeline
-            sessionId={sessionId}
-            userPhotoUri={capturedPhotoUri}
-            garment={selectedGarment}
-            selectedSize={selectedSize}
-            onComplete={handleGenerationComplete}
-            onCancel={() => setCurrentState('CATALOG')}
-          />
-        )}
+          {currentState === 'GENERATING' && (
+            <GeneratingPipeline
+              sessionId={sessionId}
+              userPhotoUri={capturedPhotoUri}
+              garment={selectedGarment}
+              selectedSize={selectedSize}
+              onComplete={handleGenerationComplete}
+              onCancel={() => setCurrentState('CATALOG')}
+            />
+          )}
 
-
-        {currentState === 'RESULT' && (
-          <ResultView
-            sessionId={sessionId}
-            originalPhotoUri={capturedPhotoUri}
-            tryonResultUri={tryonResultUri}
-            sizeRecommendation={sizeRecommendation}
-            garment={selectedGarment}
-            selectedSize={selectedSize}
-            onTryAnother={() => setCurrentState('CATALOG')}
-            onFinishSession={handleResetSession}
-          />
-        )}
+          {currentState === 'RESULT' && (
+            <ResultView
+              sessionId={sessionId}
+              originalPhotoUri={capturedPhotoUri}
+              tryonResultUri={tryonResultUri}
+              sizeRecommendation={sizeRecommendation}
+              garment={selectedGarment}
+              selectedSize={selectedSize}
+              onTryAnother={() => setCurrentState('CATALOG')}
+              onFinishSession={handleResetSession}
+            />
+          )}
+        </ErrorBoundary>
       </main>
 
       {/* Modals */}

@@ -4,7 +4,6 @@ Targets fashion e-commerce return reduction through honest fit assessment,
 fabric drape evaluation, return risk scoring, and intelligent outfit matching.
 """
 import os
-import json
 import logging
 from typing import Dict, Any, List, Optional
 import httpx
@@ -142,7 +141,7 @@ class StyleAssistant:
                 primary = f"Size {selected_size} has excessive ease; garment will lose intended tailored silhouette."
         elif raw_score >= 25:
             level = "Moderate"
-            primary = f"Minor drape divergence from your body profile. Comfortable but slightly relaxed."
+            primary = "Minor drape divergence from your body profile. Comfortable but slightly relaxed."
         else:
             level = "Low"
             primary = "Optimal match. Body dimensions align with brand grading curves."
@@ -189,14 +188,16 @@ class StyleAssistant:
         category = garment.get("category", "Upper")
         matches = []
         for item in CATALOG_ITEMS_FOR_MATCHING:
-            if category in item["compatible_categories"] and item["id"] != garment.get("id"):
+            compat_cats = item.get("compatible_categories", [])
+            item_id = str(item.get("id", ""))
+            if category in compat_cats and item_id != garment.get("id"):
                 matches.append(MatchingItem(
-                    id=item["id"],
-                    name=item["name"],
-                    category=item["category"],
-                    price=item["price"],
+                    id=item_id,
+                    name=str(item.get("name", "")),
+                    category=str(item.get("category", "")),
+                    price=str(item.get("price", "")),
                     reason=f"Harmonizes color palette and balances proportion with this {garment.get('name', 'garment')}.",
-                    thumbnail=item["thumbnail"]
+                    thumbnail=str(item.get("thumbnail", ""))
                 ))
             if len(matches) >= 3:
                 break
@@ -245,7 +246,6 @@ class StyleAssistant:
         Interactive Llama 3.2 fashion consultation chat.
         Calls Hugging Face Inference API or utilizes prompt-tuned fallback.
         """
-        token = self._get_hf_token()
         garment_name = garment.get("name", "garment")
         fabric = garment.get("fabricComposition", "premium fabric")
         category = garment.get("category", "Apparel")
@@ -351,6 +351,30 @@ class StyleAssistant:
                 if res.status_code == 200:
                     data = res.json()
                     username = data.get("name", "Authenticated User")
+
+                    # Verify if the token has permission to call serverless inference models
+                    try:
+                        inf_test = await client.post(
+                            "https://router.huggingface.co/v1/chat/completions",
+                            headers={"Authorization": f"Bearer {token}"},
+                            json={
+                                "model": self.hf_model_id,
+                                "messages": [{"role": "user", "content": "ping"}],
+                                "max_tokens": 1
+                            }
+                        )
+                        if inf_test.status_code == 403:
+                            return {
+                                "configured": True,
+                                "authenticated": False,
+                                "username": username,
+                                "model": self.hf_model_id,
+                                "mode": "Intelligent Local Stylist Fallback",
+                                "message": f"Token for '{username}' lacks 'Make calls to the serverless Inference API' permission. Using intelligent local styling fallback."
+                            }
+                    except Exception as inf_e:
+                        logger.debug(f"[LLAMA_ASSISTANT] Inference pre-check: {inf_e}")
+
                     return {
                         "configured": True,
                         "authenticated": True,

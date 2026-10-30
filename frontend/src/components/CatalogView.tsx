@@ -15,12 +15,13 @@ import { kioskAudio } from '../utils/audio';
 
 interface CatalogViewProps {
   onSelectGarment: (garment: Garment, selectedSize: string) => void;
+  userPhotoUri?: string;
 }
 
 type MainViewMode = 'canvas' | 'customizer' | 'cart';
 type CartSubMode = 'pair' | 'product';
 
-export const CatalogView: React.FC<CatalogViewProps> = ({ onSelectGarment }) => {
+export const CatalogView: React.FC<CatalogViewProps> = ({ onSelectGarment, userPhotoUri: _userPhotoUri }) => {
   // Top category navigation
   const [activeCategory, setActiveCategory] = useState<string>('Top Body');
   
@@ -58,22 +59,30 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onSelectGarment }) => 
     return true;
   });
 
-  // Items for the side carousels / quick-swaps
-  const sweaterGarment = MOCK_GARMENTS.find(g => g.id === 'garm_vf_sweater') || MOCK_GARMENTS[1];
-  const shirtGarment = MOCK_GARMENTS.find(g => g.id === 'garm_vf_shirt') || MOCK_GARMENTS[2];
+  const activeList = filteredGarments.length > 0 ? filteredGarments : MOCK_GARMENTS;
+  const currentGarmentIndex = activeList.findIndex((g) => g.id === selectedGarment.id);
+  const safeIdx = currentGarmentIndex >= 0 ? currentGarmentIndex : 0;
+  
+  // Previous and next garments in the active category for the interactive side pedestals
+  const prevGarment = activeList[(safeIdx - 1 + activeList.length) % activeList.length];
+  const nextGarment = activeList[(safeIdx + 1) % activeList.length];
+
+  // Specific accessories for outfit pairing board
   const shortsGarment = MOCK_GARMENTS.find(g => g.id === 'garm_vf_shorts') || MOCK_GARMENTS[3];
   const shoesGarment = MOCK_GARMENTS.find(g => g.id === 'garm_vf_shoes_white') || MOCK_GARMENTS[4];
 
   const handleCategoryChange = (catId: string) => {
     kioskAudio.playBeep(650, 0.05);
     setActiveCategory(catId);
-    const firstMatch = MOCK_GARMENTS.find(g => {
-      if (catId === 'Full body') return g.category === 'Full body' || g.isSaree;
+    const categoryMatches = MOCK_GARMENTS.filter(g => {
+      if (catId === 'Full body') return g.category === 'Full body' || g.isSaree || g.category === 'Dress';
       if (catId === 'Top Body') return g.category === 'Top Body' || g.category === 'Upper';
-      if (catId === 'Pants') return g.category === 'Pants';
+      if (catId === 'Pants') return g.category === 'Pants' || g.category === 'Lower';
       if (catId === 'Foot') return g.category === 'Foot';
+      if (catId === 'Head') return g.category === 'Head' || g.collection?.includes('Accessories');
       return false;
     });
+    const firstMatch = categoryMatches[0] || MOCK_GARMENTS[0];
     if (firstMatch) {
       setSelectedGarment(firstMatch);
       setSelectedSize(firstMatch.availableSizes[0] || 'M');
@@ -142,7 +151,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onSelectGarment }) => 
   }, 0);
 
   return (
-    <div className="relative w-full h-full min-h-[calc(100vh-5rem)] flex flex-col items-center justify-start p-4 md:p-6 select-none overflow-y-auto">
+    <div className="relative w-full h-[calc(100vh-5rem)] flex flex-col items-center justify-between p-3 md:p-5 select-none overflow-hidden">
       {/* Toast Notification */}
       {notification && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 spatial-glass px-5 py-2.5 rounded-full text-xs font-bold text-slate-900 border border-white shadow-xl animate-fade-in flex items-center gap-2">
@@ -152,7 +161,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onSelectGarment }) => 
       )}
 
       {/* 1. TOP FLOATING PILL NAVIGATION (Full body | Top Body | Head | Pants | Foot) */}
-      <div className="relative z-30 mb-5">
+      <div className="relative z-30 mb-2 shrink-0">
         <div className="spatial-pill p-1.5 flex items-center gap-1.5 shadow-lg border border-white/70">
           {categories.map((cat) => {
             const isActive = activeCategory === cat.id;
@@ -160,7 +169,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onSelectGarment }) => 
               <button
                 key={cat.id}
                 onClick={() => handleCategoryChange(cat.id)}
-                className={`px-5 py-2 rounded-full text-xs font-bold transition-all duration-300 ${
+                className={`px-5 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${
                   isActive
                     ? 'spatial-pill-active text-slate-900 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-white/40'
@@ -174,9 +183,9 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onSelectGarment }) => 
       </div>
 
       {/* 2. MAIN FLOATING SPATIAL GLASS VIEWPORT */}
-      <div className="relative w-full max-w-5xl spatial-glass rounded-[2.5rem] p-6 md:p-8 border border-white/80 shadow-2xl flex flex-col min-h-[720px] justify-between">
+      <div className="relative w-full max-w-5xl flex-1 spatial-glass rounded-[2rem] p-4 md:p-6 border border-white/80 shadow-2xl flex flex-col justify-between overflow-hidden min-h-0">
         {/* HUD Top Bar */}
-        <div className="flex items-center justify-between pb-4 border-b border-white/40 mb-4">
+        <div className="flex items-center justify-between pb-3 border-b border-white/40 mb-2 shrink-0">
           {/* Left HUD Controls */}
           <div className="flex items-center gap-2">
             <button
@@ -275,31 +284,34 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onSelectGarment }) => 
         {/* VIEW MODE 1: SPATIAL CANVAS (Center model + Left/Right garments) */}
         {/* ------------------------------------------------------------- */}
         {viewMode === 'canvas' && (
-          <div className="relative w-full flex-1 flex items-center justify-between min-h-[520px]">
-            {/* Left Floating Garment Pedestal (Basic Sweater) */}
+          <div className="relative w-full flex-1 flex items-center justify-between min-h-0 gap-3">
+            {/* Left Floating Garment Pedestal */}
             <div 
-              onClick={() => handleSelectGarmentDirect(sweaterGarment)}
-              className="group cursor-pointer flex flex-col items-center spatial-card p-4 rounded-3xl border border-white/70 shadow-lg hover:scale-105 transition-all duration-300 w-44 z-20"
+              onClick={() => handleSelectGarmentDirect(prevGarment)}
+              className="group cursor-pointer flex flex-col items-center spatial-card p-3 md:p-4 rounded-3xl border border-white/70 shadow-lg hover:scale-105 transition-all duration-300 w-36 md:w-44 z-20 shrink-0"
+              title={`Switch to ${prevGarment.name}`}
             >
-              <div className="w-32 h-32 flex items-center justify-center p-2 mb-2">
+              <div className="w-24 h-24 md:w-32 md:h-32 flex items-center justify-center p-2 mb-1.5">
                 <img
-                  src={sweaterGarment.flatlayImage}
-                  alt={sweaterGarment.name}
+                  src={prevGarment.flatlayImage}
+                  alt={prevGarment.name}
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/assets/garment_white_tshirt.png'; }}
                   className="max-w-full max-h-full object-contain filter drop-shadow-md group-hover:scale-110 transition duration-300"
                 />
               </div>
-              <div className="text-center">
-                <div className="text-xs font-bold text-slate-900">{sweaterGarment.name}</div>
-                <div className="text-xs font-semibold text-slate-600">{sweaterGarment.price}</div>
+              <div className="text-center w-full">
+                <div className="text-xs font-bold text-slate-900 truncate">{prevGarment.name}</div>
+                <div className="text-xs font-semibold text-slate-600">{prevGarment.price}</div>
               </div>
             </div>
 
             {/* Central Model Stage */}
-            <div className="relative flex-1 flex flex-col items-center justify-center px-4 z-10">
-              <div className="relative w-full max-w-sm h-[480px] flex items-center justify-center overflow-hidden rounded-3xl">
+            <div className="relative flex-1 flex flex-col items-center justify-center px-2 z-10 h-full max-h-[calc(100vh-14rem)]">
+              <div className="relative w-full max-w-xs md:max-w-sm h-[320px] md:h-[390px] max-h-[46vh] flex items-center justify-center overflow-hidden rounded-3xl">
                 <img
                   src={centralModelImg}
                   alt={selectedGarment.name}
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/assets/virtualfit_model_tshirt.jpg'; }}
                   className="w-full h-full object-contain filter drop-shadow-xl transition-all duration-500"
                 />
 
@@ -313,7 +325,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onSelectGarment }) => 
               </div>
 
               {/* Bottom Floating Pill Overlay: Selected Garment Info + Edit Button */}
-              <div className="relative -mt-8 z-30 spatial-glass px-6 py-3.5 rounded-full border border-white/90 shadow-2xl flex items-center gap-5">
+              <div className="relative -mt-6 z-30 spatial-glass px-5 py-2.5 rounded-full border border-white/90 shadow-2xl flex items-center gap-3 md:gap-4 shrink-0">
                 <div>
                   <div className="text-sm font-extrabold text-slate-900 leading-none">{selectedGarment.name}</div>
                   <div className="text-xs font-semibold text-slate-600 mt-0.5">{selectedGarment.price}</div>
@@ -321,7 +333,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onSelectGarment }) => 
 
                 <div className="h-5 w-[1px] bg-slate-300" />
 
-                <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-slate-700">
                   <span className="spatial-pill px-2.5 py-0.5 text-[11px] font-bold">Size: {selectedSize}</span>
                   <span className="spatial-pill px-2.5 py-0.5 text-[11px] font-bold">Color: {selectedColor}</span>
                 </div>
@@ -346,21 +358,23 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onSelectGarment }) => 
               </div>
             </div>
 
-            {/* Right Floating Garment Pedestal (Basic Shirt) */}
+            {/* Right Floating Garment Pedestal */}
             <div 
-              onClick={() => handleSelectGarmentDirect(shirtGarment)}
-              className="group cursor-pointer flex flex-col items-center spatial-card p-4 rounded-3xl border border-white/70 shadow-lg hover:scale-105 transition-all duration-300 w-44 z-20"
+              onClick={() => handleSelectGarmentDirect(nextGarment)}
+              className="group cursor-pointer flex flex-col items-center spatial-card p-3 md:p-4 rounded-3xl border border-white/70 shadow-lg hover:scale-105 transition-all duration-300 w-36 md:w-44 z-20 shrink-0"
+              title={`Switch to ${nextGarment.name}`}
             >
-              <div className="w-32 h-32 flex items-center justify-center p-2 mb-2">
+              <div className="w-24 h-24 md:w-32 md:h-32 flex items-center justify-center p-2 mb-1.5">
                 <img
-                  src={shirtGarment.flatlayImage}
-                  alt={shirtGarment.name}
+                  src={nextGarment.flatlayImage}
+                  alt={nextGarment.name}
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/assets/garment_white_tshirt.png'; }}
                   className="max-w-full max-h-full object-contain filter drop-shadow-md group-hover:scale-110 transition duration-300"
                 />
               </div>
-              <div className="text-center">
-                <div className="text-xs font-bold text-slate-900">{shirtGarment.name}</div>
-                <div className="text-xs font-semibold text-slate-600">{shirtGarment.price}</div>
+              <div className="text-center w-full">
+                <div className="text-xs font-bold text-slate-900 truncate">{nextGarment.name}</div>
+                <div className="text-xs font-semibold text-slate-600">{nextGarment.price}</div>
               </div>
             </div>
           </div>

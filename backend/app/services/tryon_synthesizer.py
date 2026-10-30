@@ -5,12 +5,11 @@ and Fal.ai CatVTON, with automatic local fallback and Saree Virtual Model Identi
 """
 import io
 import os
-import shutil
 import base64
 import logging
 import tempfile
-from typing import Optional, Tuple
-from PIL import Image, ImageFilter, ImageDraw, ImageEnhance
+from typing import Optional
+from PIL import Image, ImageFilter, ImageEnhance
 import numpy as np
 import httpx
 from app.config import settings
@@ -140,9 +139,36 @@ class TryOnSynthesizer:
 
             from gradio_client import handle_file
 
-            # Write user photo to temporary file for handle_file
+            # Normalize user photo to 3:4 portrait (768x1024) required by IDM-VTON
+            p_img = Image.open(io.BytesIO(user_photo_bytes)).convert("RGB")
+            orig_w, orig_h = p_img.size
+            is_landscape = orig_w > orig_h
+            crop_coords = None
+
+            if is_landscape or abs((orig_w / orig_h) - 0.75) > 0.08:
+                target_ratio = 0.75
+                if is_landscape:
+                    crop_h = orig_h
+                    crop_w = int(orig_h * target_ratio)
+                    x1 = max(0, (orig_w - crop_w) // 2)
+                    x2 = x1 + crop_w
+                    y1 = 0
+                    y2 = orig_h
+                else:
+                    crop_w = orig_w
+                    crop_h = int(orig_w / target_ratio)
+                    x1 = 0
+                    x2 = orig_w
+                    y1 = max(0, min(orig_h - crop_h, int(orig_h * 0.10)))
+                    y2 = y1 + crop_h
+
+                crop_coords = (x1, y1, x2, y2)
+                p_cropped = p_img.crop(crop_coords).resize((768, 1024), Image.Resampling.LANCZOS)
+            else:
+                p_cropped = p_img.resize((768, 1024), Image.Resampling.LANCZOS)
+
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp_user:
-                tmp_user.write(user_photo_bytes)
+                p_cropped.save(tmp_user, format="JPEG", quality=95)
                 tmp_user_path = tmp_user.name
 
             try:
@@ -150,7 +176,7 @@ class TryOnSynthesizer:
                 logger.info(f"[TRYON_HF] Submitting IDM-VTON diffusion task for garment: '{description}'...")
 
                 res = client.predict(
-                    dict={"background": handle_file(tmp_user_path), "layers": [], "composite": handle_file(tmp_user_path)},
+                    dict={"background": handle_file(tmp_user_path), "layers": [handle_file(tmp_user_path)], "composite": handle_file(tmp_user_path)},
                     garm_img=handle_file(garment_path),
                     garment_des=description,
                     is_checked=True,
@@ -162,10 +188,31 @@ class TryOnSynthesizer:
 
                 if res and isinstance(res, (tuple, list)) and len(res) > 0 and res[0]:
                     output_path = res[0]
+                    gen_img = Image.open(output_path).convert("RGB")
+
+                    if crop_coords is not None:
+                        x1, y1, x2, y2 = crop_coords
+                        cw = x2 - x1
+                        ch = y2 - y1
+                        gen_resized = gen_img.resize((cw, ch), Image.Resampling.LANCZOS)
+
+                        alpha_mask = Image.new("L", (cw, ch), 255)
+                        feather_w = min(30, max(5, cw // 15))
+                        for fx in range(feather_w):
+                            val = int(255 * (fx / float(feather_w)))
+                            for fy in range(ch):
+                                alpha_mask.putpixel((fx, fy), val)
+                                alpha_mask.putpixel((cw - 1 - fx, fy), val)
+
+                        full_composite = p_img.copy()
+                        full_composite.paste(gen_resized, (x1, y1), alpha_mask)
+                    else:
+                        full_composite = gen_img
+
                     out_filename = f"{session_id}_tryon_{garment_id}.jpg"
                     dest_path = os.path.join(self.captures_dir, out_filename)
+                    full_composite.save(dest_path, format="JPEG", quality=95)
 
-                    shutil.copyfile(output_path, dest_path)
                     logger.info(f"[TRYON_HF] Successfully generated photorealistic try-on result: {dest_path}")
                     return f"/assets/captures/{out_filename}"
                 else:
@@ -202,7 +249,7 @@ class TryOnSynthesizer:
             import fal_client
             os.environ["FAL_KEY"] = fal_key
 
-            logger.info(f"[TRYON_FAL] Submitting VTON job to Fal.ai...")
+            logger.info("[TRYON_FAL] Submitting VTON job to Fal.ai...")
             user_uri = self._to_data_uri(user_photo_bytes)
             garment_uri = self._to_data_uri(garment_bytes)
 
@@ -255,23 +302,28 @@ class TryOnSynthesizer:
         model_img = Image.open(model_path).convert("RGB")
 
         # 2. Check target coordinates
+        tw: int
+        th: int
+        paste_pos: tuple[int, int]
         if garment_id in SAREE_MODEL_TARGETS:
             target_info = SAREE_MODEL_TARGETS[garment_id]
-            tw, th = target_info["target_size"]
-            paste_pos = target_info["paste_pos"]
+            t_size = target_info["target_size"]
+            tw, th = int(t_size[0]), int(t_size[1])
+            p_pos = target_info["paste_pos"]
+            paste_pos = (int(p_pos[0]), int(p_pos[1]))
         else:
             # Model head calibration for VirtualFit models
             if "tshirt" in garment_id:
-                tw, th = (136, 165)
+                tw, th = 136, 165
                 head_cx, head_cy = 450, 210
             elif "sweater" in garment_id:
-                tw, th = (130, 155)
+                tw, th = 130, 155
                 head_cx, head_cy = 450, 190
             else:
                 # Shirt, blazers, western tops
-                tw, th = (130, 155)
+                tw, th = 130, 155
                 head_cx, head_cy = 460, 175
-            paste_pos = (head_cx - tw // 2, head_cy - th // 2)
+            paste_pos = (int(head_cx - tw // 2), int(head_cy - th // 2))
 
         # 3. Detect user face in user_img
         u_arr = np.array(user_img.convert("RGB"))
@@ -315,9 +367,8 @@ class TryOnSynthesizer:
         mask_img = Image.fromarray(m_arr).filter(ImageFilter.GaussianBlur(radius=4))
 
         composite = model_img.copy()
-        # For dedicated traditional Saree fusion, paste only when specifically calibrated
-        if garment_id in SAREE_MODEL_TARGETS:
-            composite.paste(face_resized, paste_pos, mask_img)
+        # Paste user identity onto model with soft feathered boundary
+        composite.paste(face_resized, paste_pos, mask_img)
 
         # 5. Drape size scaling if not M
         size_scale_factors = {"XS": 0.88, "S": 0.94, "M": 1.0, "L": 1.08, "XL": 1.16, "XXL": 1.24}
@@ -358,10 +409,12 @@ class TryOnSynthesizer:
         selected_size: str = "M"
     ) -> str:
         """
-        Directly fits and drapes the garment flatlay onto the uploaded user's photo,
+        Directly fits and drapes the garment onto the uploaded user's photo using
+        anatomical body landmarks (SAM segmentation) and garment neckline/shoulder anchors,
         preserving user face, neck, body landmarks, and room background.
         """
         try:
+            import json
             u_w, u_h = user_img.size
             is_portrait = u_h > u_w
 
@@ -374,55 +427,106 @@ class TryOnSynthesizer:
             if garment_img.mode != "RGBA":
                 garment_img = garment_img.convert("RGBA")
                 g_arr = np.array(garment_img)
-                # Sample corners
                 corner_color = np.median(g_arr[:15, :15, :3], axis=(0, 1))
                 diff = np.sqrt(np.sum((g_arr[:, :, :3].astype(float) - corner_color) ** 2, axis=2))
                 mask = np.clip((diff - 20) / 25 * 255.0, 0, 255).astype(np.uint8)
                 g_arr[:, :, 3] = mask
                 garment_img = Image.fromarray(g_arr)
 
-            size_scale_factors = {"XS": 0.88, "S": 0.94, "M": 1.0, "L": 1.08, "XL": 1.16, "XXL": 1.24}
+            size_scale_factors = {"XS": 0.90, "S": 0.95, "M": 1.0, "L": 1.06, "XL": 1.14, "XXL": 1.22}
             size_factor = size_scale_factors.get(selected_size.upper(), 1.0)
 
-            # Determine placement based on garment category
+            # 1. Extract anatomical body landmarks via SAM segmenter
+            from app.services.sam_segmenter import sam_segmenter
+            category_tag = "Dress" if ("dress" in garment_id or "saree" in garment_id) else ("Lower" if ("pant" in garment_id or "short" in garment_id) else "Upper")
+            _, _, sam_meta = sam_segmenter.generate_garment_agnostic_mask(user_img, category=category_tag)
+
+            torso_box = sam_meta.get("torso_box", [int(u_w * 0.25), int(u_h * 0.22), int(u_w * 0.75), int(u_h * 0.70)])
+            torso_left, torso_top, torso_right, torso_bottom = torso_box
+            shopper_cx = (torso_left + torso_right) // 2
+            shopper_shoulder_w = max(50, torso_right - torso_left)
+            shopper_torso_h = max(50, torso_bottom - torso_top)
+
+            # 2. Load companion garment JSON metadata if available
+            meta_path = garment_path.replace(".png", ".json").replace(".jpg", ".json")
+            g_meta = {}
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        g_meta = json.load(f)
+                except Exception as je:
+                    logger.warning(f"[TRYON] Could not read garment meta {meta_path}: {je}")
+
+            g_w, g_h = garment_img.size
             is_pant = "pant" in garment_id or "short" in garment_id
             is_shoe = "shoe" in garment_id
-            is_full = "saree" in garment_id or "dress" in garment_id or "sherwani" in garment_id or "tuxedo" in garment_id
 
             if is_pant:
-                target_w = int(u_w * (0.50 if is_portrait else 0.38) * size_factor)
-                pos_y = int(u_h * (0.50 if is_portrait else 0.52))
+                target_w = int(shopper_shoulder_w * 0.92 * size_factor)
+                aspect = g_h / g_w
+                target_h = int(target_w * aspect)
+                pos_x = shopper_cx - (target_w // 2)
+                pos_y = torso_bottom - int(target_h * 0.15)
             elif is_shoe:
                 target_w = int(u_w * (0.42 if is_portrait else 0.34) * size_factor)
-                pos_y = int(u_h * (0.82 if is_portrait else 0.76))
-            elif is_full:
-                target_w = int(u_w * (0.64 if is_portrait else 0.48) * size_factor)
-                pos_y = int(u_h * (0.20 if is_portrait else 0.25))
+                aspect = g_h / g_w
+                target_h = int(target_w * aspect)
+                pos_x = int((u_w - target_w) / 2)
+                pos_y = int(u_h * 0.80)
             else:
-                # Tops / Sweaters / Shirts / Blazers
-                target_w = int(u_w * (0.56 if is_portrait else 0.44) * size_factor)
-                pos_y = int(u_h * (0.21 if is_portrait else 0.32))
+                # Tops / Sweaters / Shirts / Blazers / Dresses
+                left_sh = g_meta.get("left_shoulder", [0.32, 0.16])
+                right_sh = g_meta.get("right_shoulder", [0.68, 0.16])
+                neck_center = g_meta.get("neckline_center", [0.50, 0.14])
+                hem_center = g_meta.get("hem_center", [0.50, 0.85])
 
-            aspect = garment_img.height / garment_img.width
-            target_h = int(target_w * aspect)
-            pos_x = int((u_w - target_w) / 2)
+                g_shoulder_span = abs(right_sh[0] - left_sh[0]) * g_w
+                g_torso_h = abs(hem_center[1] - neck_center[1]) * g_h
+
+                scale_x = (shopper_shoulder_w * 1.08 * size_factor) / max(10.0, g_shoulder_span)
+                scale_y = (shopper_torso_h * 1.05 * size_factor) / max(10.0, g_torso_h)
+                scale = scale_x * 0.70 + scale_y * 0.30
+
+                target_w = int(g_w * scale)
+                target_h = int(g_h * scale)
+
+                anchor_x = int(neck_center[0] * target_w)
+                anchor_y = int(neck_center[1] * target_h)
+                pos_x = shopper_cx - anchor_x
+                pos_y = torso_top - anchor_y
 
             garment_resized = garment_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
 
-            # Soft drop shadow underneath garment
             composite = user_img.copy().convert("RGBA")
+
+            # Soft drop shadow underneath garment
             shadow_mask = garment_resized.split()[3].filter(ImageFilter.GaussianBlur(radius=8))
-            shadow_img = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 80))
-            composite.paste(shadow_img, (pos_x, pos_y + 8), shadow_mask)
+            shadow_img = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 75))
+            composite.paste(shadow_img, (pos_x, pos_y + 6), shadow_mask)
 
             # Composite garment onto person photo
             composite.paste(garment_resized, (pos_x, pos_y), garment_resized)
+
+            # Feather chin & neck from original user image on top of garment collar
+            if not is_pant and not is_shoe:
+                chin_feather_h = int(shopper_torso_h * 0.06)
+                chin_cut_y = torso_top + chin_feather_h
+                if 0 < chin_cut_y < u_h:
+                    head_region = user_img.crop((0, 0, u_w, chin_cut_y)).convert("RGBA")
+                    head_alpha = np.ones((chin_cut_y, u_w), dtype=np.uint8) * 255
+                    if chin_feather_h > 0:
+                        for fi in range(chin_feather_h):
+                            y_pos = torso_top + fi
+                            if y_pos < chin_cut_y:
+                                head_alpha[y_pos, :] = int(255 * (1.0 - (fi / chin_feather_h)))
+                    head_region.putalpha(Image.fromarray(head_alpha))
+                    composite.paste(head_region, (0, 0), head_region)
 
             final_img = composite.convert("RGB")
             out_filename = f"{session_id}_tryon_{garment_id}.jpg"
             dest_path = os.path.join(self.captures_dir, out_filename)
             final_img.save(dest_path, format="JPEG", quality=95)
-            logger.info(f"[TRYON] Successfully draped garment on user image: {dest_path}")
+            logger.info(f"[TRYON] Successfully draped garment anatomically on user: {dest_path} (size {target_w}x{target_h} at {pos_x},{pos_y})")
             return f"/assets/captures/{out_filename}"
 
         except Exception as e:

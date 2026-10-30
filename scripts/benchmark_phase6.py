@@ -24,23 +24,18 @@ Generates:
 
 import os
 import sys
-import io
 import time
 import math
 import json
 from typing import Dict, Any, List, Tuple
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw
 import numpy as np
 
 # Add backend to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend")))
 
-from app.services.tryon_pipeline import tryon_pipeline, compute_face_similarity, detect_face_box
+from app.services.tryon_pipeline import compute_face_similarity, detect_face_box
 from app.services.sam_segmenter import sam_segmenter
-from app.services.tryon_provider import (
-    TryOnProvider, TryOnResult, TryOnError, TryOnInferenceError,
-    FaceIdentityMismatchError, HuggingFaceIDMVTONProvider
-)
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 ASSET_DIR = os.path.join(BASE_DIR, "frontend", "public", "assets")
@@ -283,7 +278,11 @@ def evaluate_mode_b_pipeline(
 
     # Stage 1: Validation
     w, h = person_img.size
+    if w < 200 or h < 200:
+        raise ValueError(f"Person image resolution too low: {w}x{h}")
     face_box = detect_face_box(person_img)
+    if not face_box or (face_box[2] <= face_box[0]):
+        raise ValueError("Face detection validation gate failed")
 
     # Stage 2: SAM Garment-Agnostic Human Parsing
     t_parse_start = time.perf_counter()
@@ -298,8 +297,6 @@ def evaluate_mode_b_pipeline(
     # We synthesize the photoreal try-on representation by compositing the standardized flatlay
     # within the agnostic parsing zone, with seam blending and shadow shading,
     # strictly preserving the exact facial identity and anatomy of the shopper.
-    pw, ph = person_img.size
-
     mask_arr = np.array(agnostic_mask).astype(float) / 255.0
 
     # Drape the garment neatly onto the agnostic area
@@ -528,14 +525,24 @@ def main():
 
     # Save Contact Sheet
     contact_sheet_path = os.path.join(ASSET_DIR, "test_contact_sheet.png")
-    brain_dir = r"C:\Users\ajay2\.gemini\antigravity-ide\brain\36bf6328-d1ff-4cc7-9e83-dfb063f622cc"
-    contact_sheet_brain = os.path.join(brain_dir, "test_contact_sheet.png")
+    brain_dir = os.environ.get("ANTIGRAVITY_ARTIFACT_DIR")
+    contact_sheet_brain = os.path.join(brain_dir, "test_contact_sheet.png") if brain_dir else None
 
     print("\nGenerating Presentation Contact Sheet...")
     build_contact_sheet(benchmark_rows, contact_sheet_path)
-    if os.path.exists(brain_dir):
+    if brain_dir and contact_sheet_brain and os.path.exists(brain_dir):
         build_contact_sheet(benchmark_rows, contact_sheet_brain)
-    print(f"[PASS] Contact sheet saved to:\n  -> {contact_sheet_path}\n  -> {contact_sheet_brain}")
+        print(f"[PASS] Contact sheet saved to:\n  -> {contact_sheet_path}\n  -> {contact_sheet_brain}")
+    else:
+        print(f"[PASS] Contact sheet saved to:\n  -> {contact_sheet_path}")
+
+    # Persist individual evaluation outputs to OUTPUT_DIR
+    for row in benchmark_rows:
+        s_id = row["subject"]["id"]
+        g_id = row["garment"]["id"]
+        row["mode_a_img"].save(os.path.join(OUTPUT_DIR, f"{s_id}_{g_id}_mode_a.png"))
+        row["agnostic_mask_img"].save(os.path.join(OUTPUT_DIR, f"{s_id}_{g_id}_mask.png"))
+        row["mode_b_img"].save(os.path.join(OUTPUT_DIR, f"{s_id}_{g_id}_mode_b.png"))
 
     # Output Summary Metrics
     avg_a_lat = np.mean(mode_a_latencies)

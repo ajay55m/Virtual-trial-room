@@ -21,6 +21,7 @@ import { kioskAudio } from '../utils/audio';
 import { poseLandmarkerService, type PoseGateEvaluation } from '../services/poseLandmarker';
 import { arDrapeEngine, type GarmentAnchorMetadata, type DrapeTelemetry } from '../services/arDrapeEngine';
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
+import { isValidUploadFile, processFileToDataUrl } from '../utils/fileUploadHelper';
 
 interface PositioningCameraProps {
   onCaptured: (photoUri: string, metrics: PoseQualityMetrics) => void;
@@ -157,6 +158,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
   const [streamActive, setStreamActive] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>(category);
   const [isDragging, setIsDragging] = useState(false);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [isLoadingVision, setIsLoadingVision] = useState(true);
   const [gateResult, setGateResult] = useState<PoseGateEvaluation | null>(null);
 
@@ -438,15 +440,15 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
     return '/assets/virtualfit_model_tshirt.jpg';
   };
 
-  const processUploadedFile = (file: File) => {
-    if (!file || !file.type.startsWith('image/')) {
-      alert('Please select a valid image file (JPEG, PNG, WEBP).');
+  const processUploadedFile = async (file: File) => {
+    if (!isValidUploadFile(file)) {
+      alert('Please select a valid photo or document (JPEG, PNG, WEBP, Apple HEIC/HEIF, or PDF).');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
+    setIsProcessingFile(true);
+    try {
+      const dataUrl = await processFileToDataUrl(file);
       if (dataUrl) {
         kioskAudio.playShutterSound();
         setUploadedPreview(dataUrl);
@@ -455,8 +457,12 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
         setCountdown(null);
         setStabilityTime(0);
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error('File processing error:', err);
+      alert(err.message || 'Unable to process the selected photo/document.');
+    } finally {
+      setIsProcessingFile(false);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -502,12 +508,10 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
       const items = e.clipboardData?.items;
       if (!items) return;
       for (let i = 0; i < items.length; i++) {
-        if (items[i].type.startsWith('image/')) {
-          const file = items[i].getAsFile();
-          if (file) {
-            processUploadedFile(file);
-            break;
-          }
+        const file = items[i].getAsFile();
+        if (file && isValidUploadFile(file)) {
+          processUploadedFile(file);
+          break;
         }
       }
     };
@@ -558,7 +562,7 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif,.HEIC,.HEIF,.pdf,.PDF,application/pdf"
         onChange={handleFileUpload}
         className="hidden"
       />
@@ -614,17 +618,29 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
                   <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center shadow-lg mb-5 group-hover:scale-105 transition-transform">
                     <Upload className="w-10 h-10" />
                   </div>
-                  <h4 className="text-xl font-black text-slate-900 mb-2">Upload Person Photo</h4>
-                  <p className="text-xs text-slate-600 max-w-sm mb-6 leading-relaxed">
-                    Select, drag-and-drop, or paste (Ctrl+V) any photo of yourself or a person. The clothing will be fitted directly onto this photo!
+                  <h4 className="text-xl font-black text-slate-900 mb-2">Upload Person Photo or Document</h4>
+                  <p className="text-xs text-slate-600 max-w-sm mb-4 leading-relaxed">
+                    Select, drag-and-drop, or paste (Ctrl+V) any photo of yourself or a person. Clothing will be fitted directly onto this photo!
                   </p>
-                  <button
-                    type="button"
-                    onClick={openFilePicker}
-                    className="px-6 py-3 rounded-2xl spatial-btn-primary text-white text-xs font-bold tracking-wider shadow-lg hover:brightness-110"
-                  >
-                    BROWSE FILES FROM DEVICE
-                  </button>
+
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-[11px] font-semibold mb-6 shadow-xs">
+                    <span>📱 iPhone Photos (HEIC) & Documents (PDF) Supported</span>
+                  </div>
+
+                  {isProcessingFile ? (
+                    <div className="flex items-center gap-2.5 px-6 py-3 rounded-2xl bg-indigo-600 text-white text-xs font-bold shadow-lg">
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Converting iPhone Photo / Document...</span>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={openFilePicker}
+                      className="px-6 py-3 rounded-2xl spatial-btn-primary text-white text-xs font-bold tracking-wider shadow-lg hover:brightness-110 active:scale-98 transition-all"
+                    >
+                      BROWSE FILES FROM DEVICE
+                    </button>
+                  )}
 
                   {/* Quick Sample Presets */}
                   <div className="mt-8 pt-6 border-t border-slate-300/60 w-full">

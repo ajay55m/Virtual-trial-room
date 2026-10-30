@@ -182,7 +182,7 @@ class TestGenerateModelPipeline(unittest.TestCase):
         simulating background task consumption on the worker cluster.
         """
         with patch("time.sleep", return_value=None):
-            result = process_vton_job(
+            result = process_vton_job(  # type: ignore
                 session_id=self.session_id,
                 garment_id="garm_002",
                 selected_size="M",
@@ -221,6 +221,7 @@ class TestGenerateModelPipeline(unittest.TestCase):
         )
         self.assertEqual(rec.fitClass, "Slim")
         self.assertIsNotNone(rec.honestyWarning)
+        assert rec.honestyWarning is not None
         self.assertIn("may feel tight", rec.honestyWarning)
 
     def test_sizing_regression_honesty_rule_oversized_warning(self):
@@ -233,6 +234,7 @@ class TestGenerateModelPipeline(unittest.TestCase):
         )
         self.assertEqual(rec.fitClass, "Relaxed")
         self.assertIsNotNone(rec.honestyWarning)
+        assert rec.honestyWarning is not None
         self.assertIn("oversized drape", rec.honestyWarning)
 
     def test_sizing_calculate_rest_endpoint(self):

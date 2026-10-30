@@ -22,7 +22,7 @@ from tests.helpers import create_sharp_test_image, create_image_with_exif
 
 # Ensure UTF-8 output on Windows consoles
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    getattr(sys.stdout, "reconfigure")(encoding="utf-8", errors="replace")
 
 
 def print_banner(text: str):

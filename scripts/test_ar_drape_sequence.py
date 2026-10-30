@@ -85,6 +85,7 @@ print("==================================================================\n")
 ema = EMAFilter(alpha=0.35)
 frames = []
 all_tests_passed = True
+prev_smooth_deg: float | None = None
 
 g_sh_left = meta["left_shoulder"][0] * gw
 g_sh_right = meta["right_shoulder"][0] * gw
@@ -129,7 +130,7 @@ for kf in motion_keyframes:
     angle_error = abs(smooth_deg - kf["tilt_deg"])
     # If steady state (> 2 frames at same tilt), angle error should be small (< 3 deg)
     # If dynamic transition, smoothed angle must trend in the direction of the target
-    is_converging = (smooth_deg - prev_smooth_deg) * (kf["tilt_deg"] - prev_smooth_deg) >= 0 if 'prev_smooth_deg' in locals() else True
+    is_converging = (smooth_deg - prev_smooth_deg) * (kf["tilt_deg"] - prev_smooth_deg) >= 0 if prev_smooth_deg is not None else True
     prev_smooth_deg = smooth_deg
 
     # Render visual proof frame

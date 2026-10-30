@@ -7,9 +7,17 @@ echo          AURA VIRTUAL FITTING ROOM - ENTERPRISE KIOSK RUNNER
 echo ======================================================================
 echo.
 
+:: 0. Stop any existing backend on port 8000 and frontend on port 5173 so clean processes start
+for /f "tokens=5" %%p in ('netstat -aon ^| findstr :8000 ^| findstr LISTENING 2^>nul') do (
+    taskkill /F /PID %%p >nul 2>&1
+)
+for /f "tokens=5" %%p in ('netstat -aon ^| findstr :5173 ^| findstr LISTENING 2^>nul') do (
+    taskkill /F /PID %%p >nul 2>&1
+)
+
 :: 1. Start Backend Gateway
 echo [*] Starting AURA FastAPI Gateway (Port 8000)...
-start "AURA API Gateway" /min powershell -NoExit -Command "cd 'C:\AI\backend'; python -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
+start "AURA API Gateway" /min powershell -NoExit -Command "cd 'C:\AI\backend'; python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
 
 :: 2. Start Frontend Dev / Preview
 echo [*] Starting Kiosk Interactive Frontend (Port 5173)...

@@ -21,10 +21,11 @@ import {
   Upload
 } from 'lucide-react';
 
-import type { Garment, SizeRecommendation } from '../types/kiosk';
+import type { Garment, SizeRecommendation, BodyMeasurements } from '../types/kiosk';
 import { kioskAudio } from '../utils/audio';
 import { apiService, type GarmentTuningOptions } from '../services/api';
 import { StyleAssistant } from './StyleAssistant';
+import { isValidUploadFile, processFileToDataUrl } from '../utils/fileUploadHelper';
 
 interface ResultViewProps {
   sessionId?: string;
@@ -77,20 +78,27 @@ export const ResultView: React.FC<ResultViewProps> = ({
     opacity: 0.96
   });
 
-  const isSaree = garment.category === 'Saree' || garment.isSaree;
+  const isSaree = garment?.category === 'Saree' || !!garment?.isSaree;
 
   // The editorial studio model image
-  const defaultModelUri = garment.virtualModelImage || garment.tryonResultImage || '/assets/virtualfit_model_tshirt.jpg';
+  const defaultModelUri = garment?.virtualModelImage || garment?.tryonResultImage || '/assets/virtualfit_model_tshirt.jpg';
   
   // Initial active display
   const initialUri = (tryonResultUri && tryonResultUri !== defaultModelUri) ? tryonResultUri : currentPersonPhoto;
   const [activeDisplayUri, setActiveDisplayUri] = useState<string>(initialUri);
+
+  useEffect(() => {
+    if (tryonResultUri && tryonResultUri !== defaultModelUri) {
+      setActiveDisplayUri(tryonResultUri);
+    }
+  }, [tryonResultUri, defaultModelUri]);
 
   const updateDrapedImage = async (
     photoUri: string,
     size: string,
     opts: GarmentTuningOptions
   ) => {
+    if (!garment) return;
     try {
       const res = await apiService.createClientSideTryonComposite(
         photoUri,
@@ -107,6 +115,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
   };
 
   const [isDragging, setIsDragging] = useState(false);
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
 
   // Re-drape when component mounts or original photo changes
   useEffect(() => {
@@ -115,21 +124,25 @@ export const ResultView: React.FC<ResultViewProps> = ({
     }
   }, [currentPersonPhoto, garment]);
 
-  const processPersonPhoto = (file: File) => {
-    if (!file || !file.type.startsWith('image/')) {
-      alert('Please select a valid image file (JPEG, PNG, WEBP).');
+  const processPersonPhoto = async (file: File) => {
+    if (!isValidUploadFile(file)) {
+      alert('Please select a valid photo or document (JPEG, PNG, WEBP, Apple HEIC/HEIF, or PDF).');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const dataUrl = event.target?.result as string;
+    setIsProcessingPhoto(true);
+    try {
+      const dataUrl = await processFileToDataUrl(file);
       if (dataUrl) {
         kioskAudio.playShutterSound();
         setCurrentPersonPhoto(dataUrl);
         await updateDrapedImage(dataUrl, currentSize, tuningOptions);
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error('Photo processing error:', err);
+      alert(err.message || 'Unable to process the selected photo/document.');
+    } finally {
+      setIsProcessingPhoto(false);
+    }
   };
 
   const handlePersonPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -174,12 +187,10 @@ export const ResultView: React.FC<ResultViewProps> = ({
       const items = e.clipboardData?.items;
       if (!items) return;
       for (let i = 0; i < items.length; i++) {
-        if (items[i].type.startsWith('image/')) {
-          const file = items[i].getAsFile();
-          if (file) {
-            processPersonPhoto(file);
-            break;
-          }
+        const file = items[i].getAsFile();
+        if (file && isValidUploadFile(file)) {
+          processPersonPhoto(file);
+          break;
         }
       }
     };
@@ -190,20 +201,37 @@ export const ResultView: React.FC<ResultViewProps> = ({
   const handleSizeChange = async (newSize: string) => {
     kioskAudio.playBeep(800, 0.05);
     setCurrentSize(newSize);
-    await updateDrapedImage(currentPersonPhoto, newSize, tuningOptions);
+    if (!tryonResultUri || tryonResultUri === defaultModelUri) {
+      await updateDrapedImage(currentPersonPhoto, newSize, tuningOptions);
+    }
   };
 
   const handleTuningChange = async (updated: Partial<GarmentTuningOptions>) => {
     const newOptions = { ...tuningOptions, ...updated };
     setTuningOptions(newOptions);
-    await updateDrapedImage(currentPersonPhoto, currentSize, newOptions);
+    if (!tryonResultUri || tryonResultUri === defaultModelUri) {
+      await updateDrapedImage(currentPersonPhoto, currentSize, newOptions);
+    }
   };
 
   const handleResetTuning = async () => {
     kioskAudio.playBeep(600, 0.05);
-    const defaults = { offsetX: 0, offsetY: 0, scale: 1.0, opacity: 0.96 };
+    const defaults = { offsetX: 0, offsetY: 0, scale: 1.0, opacity: 0.96, ambience };
     setTuningOptions(defaults);
-    await updateDrapedImage(currentPersonPhoto, currentSize, defaults);
+    if (!tryonResultUri || tryonResultUri === defaultModelUri) {
+      await updateDrapedImage(currentPersonPhoto, currentSize, defaults);
+    }
+  };
+
+  const handleAmbienceChange = async (newAmbience: 'studio' | 'warm' | 'evening') => {
+    kioskAudio.playBeep(700, 0.05);
+    setAmbience(newAmbience);
+    const updated = { ...tuningOptions, ambience: newAmbience };
+    setTuningOptions(updated);
+    // Preserves photoreal model image; lighting grade is dynamically applied via ambienceFilterClass
+    if (!tryonResultUri || tryonResultUri === defaultModelUri) {
+      await updateDrapedImage(currentPersonPhoto, currentSize, updated);
+    }
   };
 
   // Split Slider Touch / Mouse handlers
@@ -253,17 +281,34 @@ export const ResultView: React.FC<ResultViewProps> = ({
       ? 'Slim'
       : 'Regular';
 
+  const baseBreakdown: BodyMeasurements = {
+    chestCm: Math.round(baseChest),
+    waistCm: Math.round(baseWaist),
+    hipCm: Math.round(baseHip),
+    shoulderCm: Math.round(baseShoulder),
+    heightCm: heightVal,
+    chestRange: `${chestMin}–${chestMax} cm`,
+    waistRange: `${waistMin}–${waistMax} cm`,
+    hipRange: `${hipMin}–${hipMax} cm`,
+    shoulderRange: `${shoulderMin}–${shoulderMax} cm`,
+    estimationMethod: '2D Pose Landmarks & User Height'
+  };
+
   const recommendation: SizeRecommendation = sizeRecommendation && sizeRecommendation.recommendedSize === currentSize
     ? {
-        ...sizeRecommendation,
+        recommendedSize: sizeRecommendation.recommendedSize || recommendedSize,
+        confidence: sizeRecommendation.confidence ?? 0.82,
         confidenceLabel: sizeRecommendation.confidenceLabel || 'Estimated Range',
+        fitClass: sizeRecommendation.fitClass || fitClass,
+        honestyWarning: sizeRecommendation.honestyWarning,
         measurementBreakdown: {
-          ...sizeRecommendation.measurementBreakdown,
-          chestRange: sizeRecommendation.measurementBreakdown.chestRange || `${chestMin}–${chestMax} cm`,
-          waistRange: sizeRecommendation.measurementBreakdown.waistRange || `${waistMin}–${waistMax} cm`,
-          hipRange: sizeRecommendation.measurementBreakdown.hipRange || `${hipMin}–${hipMax} cm`,
-          shoulderRange: sizeRecommendation.measurementBreakdown.shoulderRange || `${shoulderMin}–${shoulderMax} cm`,
-          estimationMethod: '2D Pose Landmarks & User Height'
+          ...baseBreakdown,
+          ...(sizeRecommendation.measurementBreakdown || {}),
+          chestRange: sizeRecommendation.measurementBreakdown?.chestRange || baseBreakdown.chestRange,
+          waistRange: sizeRecommendation.measurementBreakdown?.waistRange || baseBreakdown.waistRange,
+          hipRange: sizeRecommendation.measurementBreakdown?.hipRange || baseBreakdown.hipRange,
+          shoulderRange: sizeRecommendation.measurementBreakdown?.shoulderRange || baseBreakdown.shoulderRange,
+          estimationMethod: sizeRecommendation.measurementBreakdown?.estimationMethod || baseBreakdown.estimationMethod
         }
       }
     : {
@@ -275,18 +320,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
           !isSaree && currentSize !== recommendedSize && currentSize !== '40'
             ? `Honesty Notice: You selected Size ${currentSize}. Proportional landmark estimation indicates Size ${recommendedSize} for standard ease.`
             : undefined,
-        measurementBreakdown: {
-          chestCm: Math.round(baseChest),
-          waistCm: Math.round(baseWaist),
-          hipCm: Math.round(baseHip),
-          shoulderCm: Math.round(baseShoulder),
-          heightCm: heightVal,
-          chestRange: `${chestMin}–${chestMax} cm`,
-          waistRange: `${waistMin}–${waistMax} cm`,
-          hipRange: `${hipMin}–${hipMax} cm`,
-          shoulderRange: `${shoulderMin}–${shoulderMax} cm`,
-          estimationMethod: '2D Pose Landmarks & User Height'
-        }
+        measurementBreakdown: baseBreakdown
       };
 
 
@@ -315,7 +349,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
     link.click();
   };
 
-  const availableSizes = garment.availableSizes && garment.availableSizes.length > 0
+  const availableSizes = garment?.availableSizes && garment.availableSizes.length > 0
     ? garment.availableSizes
     : ['XS', 'S', 'M', 'L', 'XL'];
 
@@ -349,7 +383,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
             <input 
               ref={photoInputRef} 
               type="file" 
-              accept="image/*" 
+              accept="image/*,.heic,.heif,.HEIC,.HEIF,.pdf,.PDF,application/pdf" 
               onChange={handlePersonPhotoUpload} 
               className="hidden" 
             />
@@ -359,6 +393,15 @@ export const ResultView: React.FC<ResultViewProps> = ({
               <div className="absolute inset-0 bg-indigo-900/60 backdrop-blur-xs flex flex-col items-center justify-center text-white z-30 pointer-events-none">
                 <Upload className="w-12 h-12 mb-2 animate-bounce" />
                 <span className="text-base font-bold">Drop your photo here to wear this outfit!</span>
+              </div>
+            )}
+
+            {/* Photo conversion overlay for iPhone HEIC / PDF */}
+            {isProcessingPhoto && (
+              <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-xs flex flex-col items-center justify-center text-white z-30">
+                <RefreshCw className="w-10 h-10 mb-3 animate-spin text-indigo-400" />
+                <span className="text-sm font-bold">Processing Photo / Document...</span>
+                <span className="text-xs text-slate-300 mt-1">Converting iPhone HEIC or PDF</span>
               </div>
             )}
 
@@ -594,7 +637,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
             <div className="absolute bottom-4 right-4 flex items-center gap-1.5 spatial-glass p-1 rounded-full border border-white/90 shadow-md z-20">
               <span className="text-[10px] font-bold text-slate-500 px-2 uppercase">Ambience:</span>
               <button
-                onClick={() => setAmbience('studio')}
+                onClick={() => handleAmbienceChange('studio')}
                 className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition ${
                   ambience === 'studio' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
@@ -602,7 +645,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
                 Daylight (5500K)
               </button>
               <button
-                onClick={() => setAmbience('warm')}
+                onClick={() => handleAmbienceChange('warm')}
                 className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition flex items-center gap-1 ${
                   ambience === 'warm' ? 'bg-amber-100 text-amber-950 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
@@ -611,7 +654,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
                 <span>Boutique Warm</span>
               </button>
               <button
-                onClick={() => setAmbience('evening')}
+                onClick={() => handleAmbienceChange('evening')}
                 className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition flex items-center gap-1 ${
                   ambience === 'evening' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
@@ -685,13 +728,13 @@ export const ResultView: React.FC<ResultViewProps> = ({
           <div className="w-full mt-4 flex items-center justify-between px-2">
             <div className="flex items-center gap-3">
               <img
-                src={garment.flatlayImage}
-                alt={garment.name}
+                src={garment?.flatlayImage || '/assets/virtualfit_model_tshirt.jpg'}
+                alt={garment?.name || 'Garment'}
                 className="w-12 h-12 object-contain rounded-xl bg-white/60 p-1 border border-white/80 shadow-xs"
               />
               <div>
-                <h4 className="font-extrabold text-slate-900 text-sm">{garment.name}</h4>
-                <div className="text-xs text-slate-500 font-medium">{garment.brand} &bull; {garment.fabricComposition}</div>
+                <h4 className="font-extrabold text-slate-900 text-sm">{garment?.name || 'Selected Item'}</h4>
+                <div className="text-xs text-slate-500 font-medium">{garment?.brand || 'AURA'} &bull; {garment?.fabricComposition || 'Premium Fabric'}</div>
               </div>
             </div>
 
@@ -700,7 +743,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
                 <div className="text-xs text-slate-600 font-medium">
                   Size: <span className="font-bold text-slate-900">{currentSize}</span>
                 </div>
-                <div className="text-sm font-bold text-slate-900">{garment.price}</div>
+                <div className="text-sm font-bold text-slate-900">{garment?.price || ''}</div>
               </div>
 
               <button

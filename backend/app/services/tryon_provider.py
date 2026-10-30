@@ -166,8 +166,42 @@ class HuggingFaceIDMVTONProvider(TryOnProvider):
         tmp_garment = None
 
         try:
+            # Normalize person capture to 3:4 portrait (768x1024) required by IDM-VTON OpenPose/DensePose
+            p_img = Image.open(io.BytesIO(person_image_bytes)).convert("RGB")
+            orig_w, orig_h = p_img.size
+            is_landscape = orig_w > orig_h
+            crop_coords = None
+
+            if is_landscape or abs((orig_w / orig_h) - 0.75) > 0.08:
+                # Center crop around torso horizontally
+                from app.services.sam_segmenter import sam_segmenter
+                _, _, smeta = sam_segmenter.generate_garment_agnostic_mask(p_img, category="Upper")
+                torso_box = smeta.get("torso_box", [orig_w // 4, 0, 3 * orig_w // 4, orig_h])
+                cx = (torso_box[0] + torso_box[2]) // 2
+
+                target_ratio = 0.75
+                if is_landscape:
+                    crop_h = orig_h
+                    crop_w = int(orig_h * target_ratio)
+                    x1 = max(0, min(orig_w - crop_w, cx - (crop_w // 2)))
+                    x2 = x1 + crop_w
+                    y1 = 0
+                    y2 = orig_h
+                else:
+                    crop_w = orig_w
+                    crop_h = int(orig_w / target_ratio)
+                    x1 = 0
+                    x2 = orig_w
+                    y1 = max(0, min(orig_h - crop_h, torso_box[1] - int(crop_h * 0.10)))
+                    y2 = y1 + crop_h
+
+                crop_coords = (x1, y1, x2, y2)
+                p_cropped = p_img.crop(crop_coords).resize((768, 1024), Image.Resampling.LANCZOS)
+            else:
+                p_cropped = p_img.resize((768, 1024), Image.Resampling.LANCZOS)
+
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f_p:
-                f_p.write(person_image_bytes)
+                p_cropped.save(f_p, format="JPEG", quality=95)
                 tmp_person = f_p.name
 
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f_g:
@@ -208,8 +242,33 @@ class HuggingFaceIDMVTONProvider(TryOnProvider):
                     provider=self.name
                 )
 
-            with open(output_file_path, "rb") as out_f:
-                out_bytes = out_f.read()
+            gen_img = Image.open(output_file_path).convert("RGB")
+
+            # If the original image was landscape, composite back into the full original scene
+            if crop_coords is not None:
+                x1, y1, x2, y2 = crop_coords
+                cw = x2 - x1
+                ch = y2 - y1
+                gen_resized = gen_img.resize((cw, ch), Image.Resampling.LANCZOS)
+                
+                # Apply soft 30px feather on left and right borders of the crop region
+                alpha_mask = Image.new("L", (cw, ch), 255)
+                feather_w = min(30, max(5, cw // 15))
+                for fx in range(feather_w):
+                    val = int(255 * (fx / float(feather_w)))
+                    for fy in range(ch):
+                        alpha_mask.putpixel((fx, fy), val)
+                        alpha_mask.putpixel((cw - 1 - fx, fy), val)
+
+                full_composite = p_img.copy()
+                full_composite.paste(gen_resized, (x1, y1), alpha_mask)
+                out_buf = io.BytesIO()
+                full_composite.save(out_buf, format="JPEG", quality=95)
+                out_bytes = out_buf.getvalue()
+            else:
+                out_buf = io.BytesIO()
+                gen_img.save(out_buf, format="JPEG", quality=95)
+                out_bytes = out_buf.getvalue()
 
             latency = time.time() - start_time
             logger.info(f"[HF_IDM_VTON] Inference succeeded in {latency:.2f}s ({len(out_bytes)} bytes)")

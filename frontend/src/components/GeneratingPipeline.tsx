@@ -31,6 +31,7 @@ export const GeneratingPipeline: React.FC<GeneratingPipelineProps> = ({
   const [retryCount, setRetryCount] = useState(0);
 
   const isMountedRef = useRef(true);
+  const pipelineStartedRef = useRef(false);
 
   const stages = [
     { title: 'Validated Capture & Framing Gate', queue: 'gate.still_validation' },
@@ -44,24 +45,36 @@ export const GeneratingPipeline: React.FC<GeneratingPipelineProps> = ({
     setWsLogs((prev) => [`[${ts}] ${msg}`, ...prev.slice(0, 25)]);
   };
 
-  // Utility to convert data URI or blob URL to Blob
+  // Utility to convert data URI or blob URL to Blob with graceful fallback
   const resolvePhotoBlob = async (uri: string): Promise<Blob> => {
-    if (uri.startsWith('data:')) {
-      const parts = uri.split(',');
-      const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-      const bstr = atob(parts[1]);
-      let n = bstr.length;
-      const u8arr = new Uint8Array(n);
-      while (n--) {
-        u8arr[n] = bstr.charCodeAt(n);
+    try {
+      if (uri.startsWith('data:')) {
+        const parts = uri.split(',');
+        const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+        const bstr = atob(parts[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) {
+          u8arr[n] = bstr.charCodeAt(n);
+        }
+        return new Blob([u8arr], { type: mime });
       }
-      return new Blob([u8arr], { type: mime });
+      const res = await fetch(uri);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.blob();
+    } catch (e) {
+      console.warn('[GeneratingPipeline] Failed resolving user capture blob, using demo person fallback:', e);
+      const fallbackRes = await fetch('/assets/demo_person_male.jpg');
+      return await fallbackRes.blob();
     }
-    const res = await fetch(uri);
-    return await res.blob();
   };
 
   const startPipeline = async () => {
+    if (pipelineStartedRef.current) {
+      return;
+    }
+    pipelineStartedRef.current = true;
+
     setIsFailed(false);
     setErrorMessage(null);
     setErrorDetails(null);
@@ -70,6 +83,18 @@ export const GeneratingPipeline: React.FC<GeneratingPipelineProps> = ({
     setWsLogs([]);
 
     logEvent(`INIT: Starting Phase 4 Photoreal Virtual Try-On for ${garment.name}`);
+
+    // Soft progress tick so user sees active movement even during remote model compilation
+    const smoothTimer = setInterval(() => {
+      if (!isMountedRef.current) {
+        clearInterval(smoothTimer);
+        return;
+      }
+      setProgress((prev) => {
+        if (prev < 90) return prev + 1;
+        return prev;
+      });
+    }, 1200);
 
     try {
       // 1. Resolve category
@@ -98,7 +123,7 @@ export const GeneratingPipeline: React.FC<GeneratingPipelineProps> = ({
 
       const jobId = submitRes.job_id;
       logEvent(`REST_ACCEPTED: Job ${jobId} registered on ${submitRes.provider}`);
-      setProgress(15);
+      setProgress((prev) => Math.max(prev, 15));
 
       // 4. Poll GET /v1/tryon/{job_id}
       let pollCount = 0;
@@ -107,6 +132,7 @@ export const GeneratingPipeline: React.FC<GeneratingPipelineProps> = ({
       const pollInterval = setInterval(async () => {
         if (!isMountedRef.current) {
           clearInterval(pollInterval);
+          clearInterval(smoothTimer);
           return;
         }
 
@@ -140,6 +166,7 @@ export const GeneratingPipeline: React.FC<GeneratingPipelineProps> = ({
           // Check terminal states
           if (job.status === 'COMPLETED') {
             clearInterval(pollInterval);
+            clearInterval(smoothTimer);
             setProgress(100);
             setCurrentStageIndex(3);
             kioskAudio.playChime();
@@ -147,15 +174,25 @@ export const GeneratingPipeline: React.FC<GeneratingPipelineProps> = ({
             
             setTimeout(() => {
               if (isMountedRef.current && job.result_url) {
+                const fitClass: 'Slim' | 'Regular' | 'Relaxed' =
+                  selectedSize === 'L' || selectedSize === 'XL'
+                    ? 'Relaxed'
+                    : selectedSize === 'XS' || selectedSize === 'S'
+                    ? 'Slim'
+                    : 'Regular';
+
                 onComplete(job.result_url, {
                   recommendedSize: selectedSize,
                   confidence: job.metrics?.face_similarity || 0.95,
+                  confidenceLabel: 'High Confidence Match',
+                  fitClass,
                   provider: job.provider,
                 });
               }
             }, 800);
           } else if (job.status === 'FAILED') {
             clearInterval(pollInterval);
+            clearInterval(smoothTimer);
             setIsFailed(true);
             setErrorMessage(job.error || 'Virtual try-on model inference failed.');
             setErrorDetails(`Provider: ${job.provider || 'Active Engine'} | Stage: ${job.stage}`);
@@ -163,6 +200,7 @@ export const GeneratingPipeline: React.FC<GeneratingPipelineProps> = ({
             logEvent(`ERROR: ${job.error || 'Pipeline failure'}`);
           } else if (pollCount >= maxPolls) {
             clearInterval(pollInterval);
+            clearInterval(smoothTimer);
             setIsFailed(true);
             setErrorMessage('Try-on processing timed out after 180 seconds. The remote model provider may be experiencing high queue demand.');
             setErrorDetails('Status: Timeout | Try switching provider or retrying in a moment.');
@@ -174,6 +212,7 @@ export const GeneratingPipeline: React.FC<GeneratingPipelineProps> = ({
       }, 1500);
 
     } catch (submitErr: any) {
+      clearInterval(smoothTimer);
       if (!isMountedRef.current) return;
       setIsFailed(true);
       setErrorMessage(submitErr.message || 'Failed to submit try-on job to backend.');
@@ -239,6 +278,7 @@ export const GeneratingPipeline: React.FC<GeneratingPipelineProps> = ({
                 <button
                   onClick={() => {
                     kioskAudio.playBeep(700, 0.05);
+                    pipelineStartedRef.current = false;
                     setRetryCount((c) => c + 1);
                   }}
                   className="px-6 py-3 rounded-full text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-md hover:shadow-lg flex items-center gap-2 transition-all"

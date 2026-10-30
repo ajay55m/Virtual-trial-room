@@ -62,29 +62,35 @@ class SAMSegmenter:
             (np.abs(r - g) > 10)
         )
 
-        # 2. Determine Head, Torso, and Limb Regions based on Human Proportions
+        # 2. Determine Head, Torso, and Anatomical Proportions
         is_landscape = w > h
-        if is_landscape:
-            head_top = int(h * 0.12)
-            head_bottom = int(h * 0.40)
-            torso_top = int(h * 0.38)
-            torso_bottom = int(h * 0.82)
-            torso_left = int(w * 0.30)
-            torso_right = int(w * 0.70)
+        search_h = int(h * 0.40)
+        skin_upper = skin_mask[:search_h, :]
+        y_idx, x_idx = np.where(skin_upper)
+        if len(y_idx) > 80:
+            cx = int(np.median(x_idx))
+            chin_y = int(np.percentile(y_idx, 92)) # Bottom of detected face/chin
+            torso_top = min(int(h * 0.35), chin_y + int(h * 0.03)) # Anchor just below chin/larynx
         else:
-            head_top = int(h * 0.05)
-            head_bottom = int(h * 0.26)
-            torso_top = int(h * 0.24)
+            cx = int(w * 0.50)
+            torso_top = int(h * (0.32 if is_landscape else 0.22))
+
+        if is_landscape:
+            torso_bottom = int(h * 0.82)
+            half_shoulder = int(w * 0.22)
+        else:
             torso_bottom = int(h * 0.74)
-            torso_left = int(w * 0.20)
-            torso_right = int(w * 0.80)
+            half_shoulder = int(w * 0.28)
+
+        torso_left = max(0, cx - half_shoulder)
+        torso_right = min(w, cx + half_shoulder)
 
         # Build initial binary garment mask based on target garment category
         garment_mask = np.zeros((h, w), dtype=np.uint8)
 
         if category in ["Upper", "Outerwear"]:
             garment_mask[torso_top:torso_bottom, torso_left:torso_right] = 255
-            # Extend slightly to shoulders
+            # Anatomical shoulder slope: shoulders slope downwards towards lateral edges
             shoulder_w = int((torso_right - torso_left) * 0.15)
             garment_mask[torso_top:int(torso_top + (torso_bottom - torso_top) * 0.4),
                          max(0, torso_left - shoulder_w):min(w, torso_right + shoulder_w)] = 255
@@ -101,25 +107,36 @@ class SAMSegmenter:
                          max(0, torso_left - shoulder_w):min(w, torso_right + shoulder_w)] = 255
 
         else:
-            # Default upper torso
             garment_mask[torso_top:torso_bottom, torso_left:torso_right] = 255
 
-        # 3. Preserve User's Head, Face, and Upper Neck from SAM Mask
+        # 3. Anatomical Curved Neckline: Cut gentle parabolic neckline around clavicle
+        collar_radius = max(20, int(half_shoulder * 0.38))
+        collar_depth = max(10, int(h * 0.04))
+        for y in range(max(0, torso_top - 5), min(h, torso_top + collar_depth + 5)):
+            for x in range(max(0, cx - collar_radius), min(w, cx + collar_radius)):
+                dx = (x - cx) / float(collar_radius)
+                parabolic_y = torso_top + collar_depth * (1.0 - dx * dx)
+                if y < parabolic_y:
+                    garment_mask[y, x] = 0
+
+        # Preserve User's Head, Face, and Upper Neck from SAM Mask
         head_neck_mask = np.zeros((h, w), dtype=bool)
         head_neck_mask[:torso_top, :] = True
         garment_mask[head_neck_mask] = 0
 
         # 4. Preserve Exposed Skin (Hands, Wrists, Forearms) from Garment Mask
-        # If user has exposed arms/hands within the bounding box, protect them
         lower_arm_zone = np.zeros((h, w), dtype=bool)
-        arm_margin = int((torso_right - torso_left) * 0.25)
-        lower_arm_zone[int(torso_top + (torso_bottom - torso_top) * 0.5):, :torso_left + arm_margin] = True
-        lower_arm_zone[int(torso_top + (torso_bottom - torso_top) * 0.5):, torso_right - arm_margin:] = True
+        arm_margin = int((torso_right - torso_left) * 0.28)
+        lower_arm_zone[int(torso_top + (torso_bottom - torso_top) * 0.45):, :torso_left + arm_margin] = True
+        lower_arm_zone[int(torso_top + (torso_bottom - torso_top) * 0.45):, torso_right - arm_margin:] = True
+        # Also protect center lower hands (hands held together in front)
+        lower_arm_zone[int(torso_top + (torso_bottom - torso_top) * 0.70):, cx - arm_margin:cx + arm_margin] = True
+
         protected_skin = skin_mask & lower_arm_zone
         garment_mask[protected_skin] = 0
 
-        # 5. Smooth and Feather the Agnostic Mask
-        mask_pil = Image.fromarray(garment_mask).filter(ImageFilter.GaussianBlur(radius=8))
+        # 5. Smooth and Feather the Agnostic Mask with Gaussian Blur
+        mask_pil = Image.fromarray(garment_mask).filter(ImageFilter.GaussianBlur(radius=6))
 
         # 6. Synthesize the Agnostic Person Image (neutralizes garment area with gray baseline)
         agnostic_arr = arr.copy()

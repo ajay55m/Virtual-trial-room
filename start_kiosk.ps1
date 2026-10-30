@@ -9,9 +9,17 @@ Write-Host "====================================================================
 Write-Host "         AURA VIRTUAL FITTING ROOM - ENTERPRISE KIOSK RUNNER          " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
+# 0. Stop any existing backend on port 8000 and frontend on port 5173
+Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | ForEach-Object {
+    Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
+}
+Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue | ForEach-Object {
+    Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
+}
+
 # 1. Start Backend Gateway
 Write-Host "[*] Launching API Gateway (Port 8000)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd 'C:\AI\backend'; python -m uvicorn app.main:app --host 127.0.0.1 --port 8000" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd 'C:\AI\backend'; python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload" -WindowStyle Minimized
 
 # 2. Start Frontend
 Write-Host "[*] Launching Kiosk Touch UI (Port 5173)..." -ForegroundColor Yellow
