@@ -200,7 +200,7 @@ def analyze_size(landmarks, img_h: int, img_w: int, user_height_cm: float, categ
 
 
 # -----------------------------------------------------------------------------
-# 4. Realistic Warping & Smoothing Layer
+# 4. Realistic Warping, Smoothing, Lighting & Occlusion Layer
 # -----------------------------------------------------------------------------
 class LandmarkSmoother:
     """Exponential Moving Average (EMA) smoothing filter to eliminate tracking jitter."""
@@ -237,6 +237,75 @@ class LandmarkSmoother:
         self.prev_landmarks = None
 
 
+def match_lighting_lab(frame_bgr: np.ndarray, dress_bgr: np.ndarray, alpha_mask: np.ndarray) -> np.ndarray:
+    """
+    Converts frame and dress to LAB color space, matching dress luminance
+    to the ambient environment before blending.
+    """
+    valid_mask = alpha_mask > 0.05
+    if not np.any(valid_mask):
+        return dress_bgr
+
+    frame_lab = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2LAB)
+    dress_lab = cv2.cvtColor(dress_bgr, cv2.COLOR_BGR2LAB)
+
+    person_mean_l = float(np.mean(frame_lab[:, :, 0][valid_mask]))
+    dress_mean_l = float(np.mean(dress_lab[:, :, 0][valid_mask]))
+
+    if dress_mean_l > 5.0:
+        delta_l = (person_mean_l - dress_mean_l) * 0.50
+        dress_l = np.clip(dress_lab[:, :, 0].astype(np.float32) + delta_l, 0, 255).astype(np.uint8)
+        dress_lab[:, :, 0] = dress_l
+        return cv2.cvtColor(dress_lab, cv2.COLOR_LAB2BGR)
+
+    return dress_bgr
+
+
+def generate_occlusion_mask(landmarks: list, img_h: int, img_w: int, shoulder_dist: float) -> np.ndarray:
+    """
+    Builds occlusion mask for face, hair, neck, and foreground hands
+    so they always render ABOVE the dress layer.
+    """
+    mask = np.zeros((img_h, img_w), dtype=np.float32)
+
+    # 1. Face & Chin region (landmarks 0..10)
+    face_pts = []
+    for i in range(11):
+        fx = int(landmarks[i][0] * img_w)
+        fy = int(landmarks[i][1] * img_h)
+        face_pts.append((fx, fy))
+
+    if face_pts:
+        face_hull = cv2.convexHull(np.array(face_pts, dtype=np.int32))
+        cv2.fillConvexPoly(mask, face_hull, 1.0)
+        center_x = int(np.mean([p[0] for p in face_pts]))
+        center_y = int(np.mean([p[1] for p in face_pts]))
+        axes = (int(shoulder_dist * 0.38), int(shoulder_dist * 0.45))
+        cv2.ellipse(mask, (center_x, center_y), axes, 0, 0, 360, 1.0, -1)
+
+    # 2. Hands, wrists, and forearms in front of torso (landmarks 15..22)
+    sh_top_y = min(landmarks[11][1], landmarks[12][1]) * img_h
+    hip_bot_y = max(landmarks[23][1], landmarks[24][1]) * img_h + shoulder_dist * 0.5
+    hand_radius = max(18, int(shoulder_dist * 0.16))
+
+    for h_idx in [15, 16, 17, 18, 19, 20, 21, 22]:
+        hx = int(landmarks[h_idx][0] * img_w)
+        hy = int(landmarks[h_idx][1] * img_h)
+        if sh_top_y <= hy <= hip_bot_y:
+            cv2.circle(mask, (hx, hy), hand_radius, 1.0, -1)
+
+    # Connect forearm segments if situated in front of torso
+    for (elbow_idx, wrist_idx) in [(13, 15), (14, 16)]:
+        ex = int(landmarks[elbow_idx][0] * img_w)
+        ey = int(landmarks[elbow_idx][1] * img_h)
+        wx = int(landmarks[wrist_idx][0] * img_w)
+        wy = int(landmarks[wrist_idx][1] * img_h)
+        if sh_top_y <= max(ey, wy) and min(ey, wy) <= hip_bot_y:
+            cv2.line(mask, (ex, ey), (wx, wy), 1.0, int(hand_radius * 1.5))
+
+    return cv2.GaussianBlur(mask, (9, 9), 0)
+
+
 def warp_garment_perspective(
     frame: np.ndarray,
     garment_rgba: np.ndarray,
@@ -245,18 +314,15 @@ def warp_garment_perspective(
 ) -> np.ndarray:
     """
     Warps garment PNG to person using 4-point perspective transform, rotation angle,
-    and soft edge feathering.
+    lighting match, and face/hand occlusion masking.
     """
     img_h, img_w = frame.shape[:2]
     g_h, g_w = garment_rgba.shape[:2]
     g_type = garment.get("type", "upper").lower()
 
-    # Landmark coordinates in pixels
-    # 11: Right Shoulder, 12: Left Shoulder
     pt11 = (landmarks[11][0] * img_w, landmarks[11][1] * img_h)
     pt12 = (landmarks[12][0] * img_w, landmarks[12][1] * img_h)
 
-    # Order viewer-left to viewer-right
     sh_left = pt11 if pt11[0] <= pt12[0] else pt12
     sh_right = pt12 if pt11[0] <= pt12[0] else pt11
 
@@ -265,18 +331,11 @@ def warp_garment_perspective(
     shoulder_dist = max(20.0, np.hypot(dx, dy))
     angle_rad = np.arctan2(dy, dx)
 
-    # Garment width scaling ratio:
-    # width = shoulder_distance * 1.45 for Shirt/T-Shirt/Top
-    # width = shoulder_distance * 1.35 for Kurti/Saree
     if g_type in ["long_upper", "kurti", "saree"]:
         target_width = shoulder_dist * 1.35
     else:
         target_width = shoulder_dist * 1.45
 
-    # Determine lower anchor landmarks based on garment category
-    # upper = till Hip(24)
-    # long_upper/Kurti = till Knee(26)
-    # Saree = till Ankle(28)
     if g_type == "upper":
         b1 = (landmarks[23][0] * img_w, landmarks[23][1] * img_h)
         b2 = (landmarks[24][0] * img_w, landmarks[24][1] * img_h)
@@ -290,18 +349,15 @@ def warp_garment_perspective(
     bot_left = b1 if b1[0] <= b2[0] else b2
     bot_right = b2 if b1[0] <= b2[0] else b1
 
-    # Midpoints
     mid_top_x = (sh_left[0] + sh_right[0]) / 2.0
-    mid_top_y = (sh_left[1] + sh_right[1]) / 2.0 - shoulder_dist * 0.16  # collar sits slightly above shoulders
+    mid_top_y = (sh_left[1] + sh_right[1]) / 2.0 - shoulder_dist * 0.16
 
     mid_bot_x = (bot_left[0] + bot_right[0]) / 2.0
     mid_bot_y = (bot_left[1] + bot_right[1]) / 2.0
 
-    # Unit vector along shoulder tilt
     ux = np.cos(angle_rad)
     uy = np.sin(angle_rad)
 
-    # Destination 4 points (Perspective Quad)
     dst_tl = [mid_top_x - (target_width / 2.0) * ux, mid_top_y - (target_width / 2.0) * uy]
     dst_tr = [mid_top_x + (target_width / 2.0) * ux, mid_top_y + (target_width / 2.0) * uy]
 
@@ -312,7 +368,6 @@ def warp_garment_perspective(
     dst_pts = np.float32([dst_tl, dst_tr, dst_br, dst_bl])
     src_pts = np.float32([[0, 0], [g_w, 0], [g_w, g_h], [0, g_h]])
 
-    # Perspective Warp Matrix
     M = cv2.getPerspectiveTransform(src_pts, dst_pts)
     warped_rgba = cv2.warpPerspective(
         garment_rgba, M, (img_w, img_h),
@@ -321,15 +376,20 @@ def warp_garment_perspective(
         borderValue=(0, 0, 0, 0)
     )
 
-    # 4. Soft Edge Feathering: Blur dress mask with GaussianBlur(7,7)
+    # 4. Soft Edge Feathering
     raw_alpha = warped_rgba[:, :, 3].astype(np.float32) / 255.0
     feathered_alpha = cv2.GaussianBlur(raw_alpha, (7, 7), 0)
-    feathered_3ch = np.dstack([feathered_alpha] * 3)
 
-    warped_bgr = warped_rgba[:, :, :3]
+    # 5. MediaPipe Segmentation Occlusion (Keep face & hands ABOVE dress layer)
+    occlusion_mask = generate_occlusion_mask(landmarks, img_h, img_w, shoulder_dist)
+    effective_alpha = np.clip(feathered_alpha * (1.0 - occlusion_mask), 0.0, 1.0)
 
-    # Alpha blend onto frame
-    blended_frame = (frame.astype(np.float32) * (1.0 - feathered_3ch) + warped_bgr.astype(np.float32) * feathered_3ch).astype(np.uint8)
+    # 6. Lighting Match in LAB color space
+    matched_bgr = match_lighting_lab(frame, warped_rgba[:, :, :3], effective_alpha)
+
+    # 7. Alpha blending with feathered mask
+    effective_3ch = np.dstack([effective_alpha] * 3)
+    blended_frame = (frame.astype(np.float32) * (1.0 - effective_3ch) + matched_bgr.astype(np.float32) * effective_3ch).astype(np.uint8)
     return blended_frame
 
 
