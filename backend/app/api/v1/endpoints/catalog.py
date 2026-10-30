@@ -1,6 +1,14 @@
-from fastapi import APIRouter, HTTPException
-from typing import List
+from fastapi import APIRouter, HTTPException, Depends
+from typing import List, Optional
+import logging
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.schemas import Garment
+from app.models.db_models import GarmentModel
+from app.database import get_db
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -193,14 +201,81 @@ CATALOG_ITEMS: List[dict] = [
     }
 ]
 
+def model_to_garment(m: GarmentModel) -> dict:
+    return {
+        "id": m.id,
+        "sku": m.sku,
+        "name": m.name,
+        "brand": m.brand,
+        "category": m.category,
+        "price": m.price,
+        "fabricComposition": m.fabric_composition,
+        "stretchClass": m.stretch_class,
+        "patternType": m.pattern_type,
+        "tryonSupported": m.tryon_supported,
+        "suitabilityScore": m.suitability_score,
+        "flatlayImage": m.flatlay_image,
+        "tryonResultImage": m.tryon_result_image,
+        "virtualModelImage": m.tryon_result_image,
+        "isSaree": "saree" in m.id or m.category == "Saree",
+        "availableSizes": m.available_sizes or ["S", "M", "L"],
+        "description": m.description
+    }
+
+async def seed_garments_if_empty(db: AsyncSession):
+    try:
+        res = await db.execute(select(GarmentModel))
+        existing = res.scalars().all()
+        if not existing:
+            for item in CATALOG_ITEMS:
+                gm = GarmentModel(
+                    id=item["id"],
+                    sku=item["sku"],
+                    name=item["name"],
+                    brand=item["brand"],
+                    category=item["category"],
+                    price=item["price"],
+                    fabric_composition=item["fabricComposition"],
+                    stretch_class=item["stretchClass"],
+                    pattern_type=item["patternType"],
+                    tryon_supported=item.get("tryonSupported", True),
+                    suitability_score=item.get("suitabilityScore", 95),
+                    flatlay_image=item["flatlayImage"],
+                    tryon_result_image=item["tryonResultImage"],
+                    available_sizes=item["availableSizes"],
+                    description=item["description"],
+                    size_chart=item.get("sizeChart", None)
+                )
+                db.add(gm)
+            await db.commit()
+            logger.info(f"Database seeded with {len(CATALOG_ITEMS)} initial garments.")
+    except Exception as e:
+        logger.warning(f"Database seeding deferred: {e}")
+
 @router.get("", response_model=List[Garment])
-async def get_garment_catalog():
-    """Retrieve full catalog of virtual try-on compatible garments."""
+async def get_garment_catalog(db: AsyncSession = Depends(get_db)):
+    """Retrieve full catalog of virtual try-on compatible garments from DB (or fallback)."""
+    try:
+        await seed_garments_if_empty(db)
+        res = await db.execute(select(GarmentModel))
+        db_items = res.scalars().all()
+        if db_items:
+            return [model_to_garment(m) for m in db_items]
+    except Exception as e:
+        logger.debug(f"DB query fallback to in-memory catalog: {e}")
     return CATALOG_ITEMS
 
 @router.get("/{garment_id}", response_model=Garment)
-async def get_garment_by_id(garment_id: str):
-    """Retrieve specific garment item by unique ID."""
+async def get_garment_by_id(garment_id: str, db: AsyncSession = Depends(get_db)):
+    """Retrieve specific garment item by unique ID from DB (or fallback)."""
+    try:
+        res = await db.execute(select(GarmentModel).where(GarmentModel.id == garment_id))
+        item = res.scalar_one_or_none()
+        if item:
+            return model_to_garment(item)
+    except Exception as e:
+        logger.debug(f"DB query fallback: {e}")
+
     for item in CATALOG_ITEMS:
         if item["id"] == garment_id:
             return item

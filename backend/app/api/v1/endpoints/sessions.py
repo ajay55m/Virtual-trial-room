@@ -1,7 +1,13 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Depends
 from datetime import datetime, timedelta, timezone
 import uuid
 import asyncio
+import logging
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.models.db_models import Session as DBSession, Kiosk as DBKiosk, AuditEvent as DBAuditEvent
 from app.models.schemas import (
     SessionCreateRequest,
     SessionResponse,
@@ -16,6 +22,8 @@ from app.services.sizing_engine import sizing_engine
 from app.services.queue import connection_manager
 from app.config import settings
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 ACTIVE_SESSIONS = {}
@@ -24,9 +32,10 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 @router.post("", response_model=SessionResponse)
-async def create_session(request: SessionCreateRequest):
+async def create_session(request: SessionCreateRequest, db: AsyncSession = Depends(get_db)):
     """
     Creates a new transient fitting room session with 15-minute TTL.
+    Persists session and audit event to DB and initializes active in-memory session.
     """
     session_id = f"sess_{uuid.uuid4().hex[:12]}"
     now = utc_now()
@@ -47,12 +56,45 @@ async def create_session(request: SessionCreateRequest):
 
     ACTIVE_SESSIONS[session_id] = session_data
 
+    # Persist in DB
+    try:
+        k_res = await db.execute(select(DBKiosk).where(DBKiosk.id == request.kioskId))
+        kiosk = k_res.scalar_one_or_none()
+        if not kiosk:
+            kiosk = DBKiosk(id=request.kioskId, store_location="Retail Store Kiosk", is_active=True)
+            db.add(kiosk)
+            await db.flush()
+
+        db_session = DBSession(
+            id=session_id,
+            kiosk_id=request.kioskId,
+            user_height_cm=request.heightCm,
+            gender_preference=request.genderPreference or "Unisex",
+            consent_signed=request.consentSigned,
+            status="ACTIVE",
+            created_at=now,
+            expires_at=expires_at
+        )
+        db.add(db_session)
+
+        audit = DBAuditEvent(
+            session_id=session_id,
+            kiosk_id=request.kioskId,
+            event_type="SESSION_CREATED",
+            details={"height_cm": request.heightCm, "consent": request.consentSigned}
+        )
+        db.add(audit)
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"Database session write deferred: {e}")
+
     return SessionResponse(**session_data)
 
 @router.post("/{session_id}/captures", response_model=CaptureResponse)
 async def upload_session_capture(
     session_id: str,
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Uploads camera still, strips all EXIF metadata, verifies sharpness, and saves to ephemeral storage.
@@ -80,6 +122,19 @@ async def upload_session_capture(
     ACTIVE_SESSIONS[session_id]["captureUrl"] = signed_url
     ACTIVE_SESSIONS[session_id]["sharpness"] = sharpness
     ACTIVE_SESSIONS[session_id]["captureBytes"] = sanitized_bytes
+
+    # Log Audit Event
+    try:
+        audit = DBAuditEvent(
+            session_id=session_id,
+            kiosk_id=ACTIVE_SESSIONS[session_id].get("kioskId"),
+            event_type="CAPTURE_UPLOADED",
+            details={"sharpness": sharpness, "approved": sharpness >= 50.0}
+        )
+        db.add(audit)
+        await db.commit()
+    except Exception as e:
+        logger.debug(f"Audit event write skipped: {e}")
 
     return CaptureResponse(
         captureId=capture_id,
@@ -165,7 +220,8 @@ async def run_vton_pipeline_simulation(session_id: str, garment_id: str, selecte
 async def submit_tryon_job(
     session_id: str,
     request: TryOnJobRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Submits a new virtual try-on inference job, queues task, and initiates WebSocket stream.
@@ -175,6 +231,19 @@ async def submit_tryon_job(
 
     user_height = ACTIVE_SESSIONS[session_id].get("heightCm", 175.0)
     job_id = f"job_{uuid.uuid4().hex[:8]}"
+
+    # Log Audit Event
+    try:
+        audit = DBAuditEvent(
+            session_id=session_id,
+            kiosk_id=ACTIVE_SESSIONS[session_id].get("kioskId"),
+            event_type="TRYON_SUBMITTED",
+            details={"garmentId": request.garmentId, "selectedSize": request.selectedSize}
+        )
+        db.add(audit)
+        await db.commit()
+    except Exception as e:
+        logger.debug(f"Audit event write skipped: {e}")
 
     background_tasks.add_task(
         run_vton_pipeline_simulation,

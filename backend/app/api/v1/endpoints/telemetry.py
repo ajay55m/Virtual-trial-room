@@ -1,6 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from typing import List, Dict, Any
 from datetime import datetime, timezone
+from sqlalchemy import select, desc
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.models.db_models import AuditEvent as DBAuditEvent
 from app.models.schemas import TelemetryLog
 
 router = APIRouter()
@@ -40,9 +45,24 @@ SYSTEM_LOGS: List[TelemetryLog] = [
 ]
 
 @router.get("/logs", response_model=List[TelemetryLog])
-async def get_telemetry_logs():
-    """Returns real-time telemetry and audit events for the Kiosk Admin modal."""
-    return SYSTEM_LOGS
+async def get_telemetry_logs(db: AsyncSession = Depends(get_db)):
+    """Returns real-time telemetry and audit events from the database for the Kiosk Admin modal."""
+    logs = list(SYSTEM_LOGS)
+    try:
+        res = await db.execute(select(DBAuditEvent).order_by(desc(DBAuditEvent.timestamp)).limit(10))
+        events = res.scalars().all()
+        for ev in reversed(events):
+            t_str = ev.timestamp.strftime("%H:%M:%S.%f")[:-3] if ev.timestamp else utc_now().strftime("%H:%M:%S.%f")[:-3]
+            logs.append(TelemetryLog(
+                id=f"audit_{ev.id[:8]}",
+                timestamp=t_str,
+                level="AUDIT",
+                component="SecurityAudit",
+                message=f"DB_AUDIT: {ev.event_type} on session {ev.session_id or 'fleet'}"
+            ))
+    except Exception:
+        pass
+    return logs
 
 @router.get("/metrics")
 async def get_system_metrics() -> Dict[str, Any]:

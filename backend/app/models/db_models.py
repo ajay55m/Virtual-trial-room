@@ -2,15 +2,11 @@ from datetime import datetime, timezone
 import uuid
 from typing import Any
 
-try:
-    from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, JSON, ForeignKey, Text
-    from sqlalchemy.orm import declarative_base
-    Base = declarative_base()
-except ImportError:
-    # Graceful fallback for environments where SQLAlchemy is still installing
-    class Base:  # type: ignore
-        pass
-    Column = String = Integer = Float = Boolean = DateTime = JSON = ForeignKey = Text = lambda *args, **kwargs: None  # type: ignore
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, JSON, ForeignKey, Text
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
 
 def generate_uuid() -> str:
     return str(uuid.uuid4())
