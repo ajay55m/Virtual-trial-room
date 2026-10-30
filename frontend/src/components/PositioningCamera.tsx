@@ -337,7 +337,8 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
                     canvas.width,
                     canvas.height,
                     isMirrored,
-                    trackingLatency
+                    trackingLatency,
+                    evaluation.medianSize || 'M'
                   );
                   setDrapeTelemetry(telemetry);
                 } else {
@@ -748,13 +749,17 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
                     <span className="text-xs font-bold text-slate-800">Loading MediaPipe Pose Landmarker...</span>
                   </div>
                 ) : gateResult ? (
-                  <div className={`px-6 py-3 rounded-full border backdrop-blur-md shadow-2xl flex items-center gap-3 transition-all duration-300 ${
+                  <div className={`px-6 py-3 rounded-full border backdrop-blur-md shadow-2xl flex items-center gap-3 transition-all duration-300 pointer-events-auto ${
                     gateResult.passed 
                       ? 'bg-emerald-500/90 border-emerald-300 text-white scale-105' 
+                      : (gateResult.blockModeA || gateResult.suggestPhotoreal)
+                      ? 'bg-indigo-950/90 border-indigo-400 text-white shadow-indigo-500/20'
                       : 'bg-slate-900/85 border-amber-400/80 text-white'
                   }`}>
                     {gateResult.passed ? (
                       <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0 animate-bounce" />
+                    ) : (gateResult.blockModeA || gateResult.suggestPhotoreal) ? (
+                      <Sparkles className="w-5 h-5 text-indigo-400 shrink-0 animate-pulse" />
                     ) : (
                       <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
                     )}
@@ -768,6 +773,20 @@ export const PositioningCamera: React.FC<PositioningCameraProps> = ({
                         </div>
                       )}
                     </div>
+                    {(gateResult.blockModeA || gateResult.suggestPhotoreal) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveMode('upload');
+                          setUseWebcam(false);
+                          openFilePicker();
+                        }}
+                        className="ml-2 px-3 py-1.5 rounded-full text-xs font-bold bg-indigo-500 hover:bg-indigo-400 text-white transition-all shadow-md shrink-0 flex items-center gap-1"
+                      >
+                        <span>Use Photoreal Mode</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 ) : null}
               </div>

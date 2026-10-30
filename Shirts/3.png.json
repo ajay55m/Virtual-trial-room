@@ -1,0 +1,73 @@
+{
+  "sku": "VF-TOP-SWT-02",
+  "name": "Basic Sweater (Flat-Lay Cashmere)",
+  "category": "upper",
+  "aspect_ratio": 1.0,
+  "neckline_center": [
+    0.5,
+    0.17
+  ],
+  "left_shoulder": [
+    0.35,
+    0.19
+  ],
+  "right_shoulder": [
+    0.65,
+    0.19
+  ],
+  "hem_center": [
+    0.5,
+    0.85
+  ],
+  "left_cuff": [
+    0.06,
+    0.78
+  ],
+  "right_cuff": [
+    0.94,
+    0.78
+  ],
+  "bbox": [
+    0.05,
+    0.16,
+    0.95,
+    0.85
+  ],
+  "id": "sweater1",
+  "type": "upper",
+  "fit_factor": 1.45,
+  "anchors": {
+    "neck_left": [
+      0.41,
+      0.09
+    ],
+    "neck_right": [
+      0.59,
+      0.09
+    ],
+    "shoulder_left": [
+      0.19,
+      0.13
+    ],
+    "shoulder_right": [
+      0.81,
+      0.13
+    ],
+    "armpit_left": [
+      0.23,
+      0.37
+    ],
+    "armpit_right": [
+      0.77,
+      0.37
+    ],
+    "hem_left": [
+      0.24,
+      0.94
+    ],
+    "hem_right": [
+      0.76,
+      0.94
+    ]
+  }
+}

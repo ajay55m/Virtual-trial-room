@@ -32,5 +32,42 @@
     0.08,
     0.93,
     0.89
-  ]
+  ],
+  "id": "tshirt1",
+  "type": "upper",
+  "fit_factor": 1.45,
+  "anchors": {
+    "neck_left": [
+      0.4,
+      0.1
+    ],
+    "neck_right": [
+      0.6,
+      0.1
+    ],
+    "shoulder_left": [
+      0.2,
+      0.14
+    ],
+    "shoulder_right": [
+      0.8,
+      0.14
+    ],
+    "armpit_left": [
+      0.24,
+      0.36
+    ],
+    "armpit_right": [
+      0.76,
+      0.36
+    ],
+    "hem_left": [
+      0.25,
+      0.92
+    ],
+    "hem_right": [
+      0.75,
+      0.92
+    ]
+  }
 }

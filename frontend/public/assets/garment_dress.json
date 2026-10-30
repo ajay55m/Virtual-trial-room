@@ -24,5 +24,42 @@
     0.06,
     0.81,
     0.96
-  ]
+  ],
+  "id": "dress1",
+  "type": "long_upper",
+  "fit_factor": 1.35,
+  "anchors": {
+    "neck_left": [
+      0.43,
+      0.08
+    ],
+    "neck_right": [
+      0.57,
+      0.08
+    ],
+    "shoulder_left": [
+      0.22,
+      0.13
+    ],
+    "shoulder_right": [
+      0.78,
+      0.13
+    ],
+    "armpit_left": [
+      0.26,
+      0.35
+    ],
+    "armpit_right": [
+      0.74,
+      0.35
+    ],
+    "hem_left": [
+      0.18,
+      0.96
+    ],
+    "hem_right": [
+      0.82,
+      0.96
+    ]
+  }
 }

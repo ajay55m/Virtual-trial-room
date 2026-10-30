@@ -86,6 +86,45 @@ export const ResultView: React.FC<ResultViewProps> = ({
   // Initial active display
   const initialUri = (tryonResultUri && tryonResultUri !== defaultModelUri) ? tryonResultUri : currentPersonPhoto;
   const [activeDisplayUri, setActiveDisplayUri] = useState<string>(initialUri);
+  const [isGeneratingAI, setIsGeneratingAI] = useState<boolean>(false);
+  const [aiProgressMessage, setAiProgressMessage] = useState<string>('');
+  const [calibrationSaved, setCalibrationSaved] = useState<boolean>(false);
+
+  // Task 7: Precision Drape Tuner calibration state (-20 to +20, 0.90 to 1.10, etc.)
+  const [drapeTuning, setDrapeTuning] = useState<{
+    offsetX: number;        // -20 to +20px
+    offsetY: number;        // -20 to +20px
+    widthScale: number;     // 0.90 to 1.10
+    lengthScale: number;    // 0.90 to 1.15
+    shoulderExpand: number; // 1.30 to 1.70
+  }>({
+    offsetX: 0,
+    offsetY: 0,
+    widthScale: 1.00,
+    lengthScale: 1.00,
+    shoulderExpand: 1.45,
+  });
+
+  // Load saved calibration per garment ID from localStorage
+  useEffect(() => {
+    if (garment?.id) {
+      const saved = localStorage.getItem(`drape_calibration_${garment.id}`);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          setDrapeTuning(parsed);
+          setTuningOptions(prev => ({
+            ...prev,
+            offsetX: parsed.offsetX,
+            offsetY: parsed.offsetY,
+            scale: parsed.widthScale
+          }));
+        } catch (e) {
+          console.warn('Failed to parse saved calibration:', e);
+        }
+      }
+    }
+  }, [garment?.id]);
 
   useEffect(() => {
     if (tryonResultUri && tryonResultUri !== defaultModelUri) {
@@ -93,34 +132,101 @@ export const ResultView: React.FC<ResultViewProps> = ({
     }
   }, [tryonResultUri, defaultModelUri]);
 
-  const updateDrapedImage = async (
+  /**
+   * Mode B: Photoreal Virtual Try-On Pipeline (Task 6)
+   * Disables crude 2D canvas overlay completely.
+   * Dispatches directly to backend IDM-VTON / CatVTON AI pipeline with live status polling.
+   * Falls back to seamless generative identity fusion if remote gateway is offline.
+   */
+  const generatePhotorealTryon = async (
     photoUri: string,
     size: string,
-    opts: GarmentTuningOptions
+    opts: GarmentTuningOptions = tuningOptions
   ) => {
     if (!garment) return;
+    setIsGeneratingAI(true);
+    setAiProgressMessage('Initializing Photoreal AI Try-On (IDM-VTON)...');
     try {
-      const res = await apiService.createClientSideTryonComposite(
-        photoUri,
-        garment,
-        size,
-        opts
-      );
-      if (res) {
-        setActiveDisplayUri(res);
+      let personBlob: Blob;
+      if (photoUri.startsWith('data:')) {
+        const parts = photoUri.split(',');
+        const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+        const byteStr = atob(parts[1]);
+        const n = byteStr.length;
+        const u8arr = new Uint8Array(n);
+        for (let i = 0; i < n; i++) {
+          u8arr[i] = byteStr.charCodeAt(i);
+        }
+        personBlob = new Blob([u8arr], { type: mime });
+      } else {
+        const res = await fetch(photoUri);
+        personBlob = await res.blob();
+      }
+
+      setAiProgressMessage('Extracting garment-agnostic pose & human parsing...');
+
+      let jobCompleted = false;
+      try {
+        const cat = garment.category === 'Saree' ? 'dresses' : 'upper_body';
+        const submitRes = await apiService.submitPhotorealTryon(
+          personBlob,
+          garment.id,
+          undefined,
+          cat,
+          garment.description || garment.name
+        );
+
+        if (submitRes && submitRes.job_id) {
+          setAiProgressMessage('Generating neural garment drape with IDM-VTON...');
+          const startPoll = Date.now();
+          while (Date.now() - startPoll < 35000) {
+            await new Promise((r) => setTimeout(r, 1500));
+            const statusRes = await apiService.pollTryonJob(submitRes.job_id);
+            if (statusRes.logs && statusRes.logs.length > 0) {
+              const lastLog = statusRes.logs[statusRes.logs.length - 1];
+              setAiProgressMessage(lastLog.replace(/\[\d+:\d+:\d+\]\s*/, ''));
+            }
+            if (statusRes.status === 'COMPLETED' && statusRes.result_url) {
+              setActiveDisplayUri(statusRes.result_url);
+              jobCompleted = true;
+              break;
+            } else if (statusRes.status === 'FAILED') {
+              console.warn('[Mode B] Photoreal VTON job failed, falling back to seamless fusion:', statusRes.error);
+              break;
+            }
+          }
+        }
+      } catch (apiErr) {
+        console.warn('[Mode B] Backend try-on API offline, using high-res model fusion:', apiErr);
+      }
+
+      if (!jobCompleted) {
+        setAiProgressMessage('Finalizing studio model garment fusion...');
+        const fused = await apiService.blendUserFaceOntoModel(
+          photoUri,
+          defaultModelUri,
+          garment.category,
+          size,
+          opts
+        );
+        setActiveDisplayUri(fused);
       }
     } catch (err) {
-      console.warn('[ResultView] Composite generation error:', err);
+      console.error('[Mode B] Photoreal execution error:', err);
+      setActiveDisplayUri(defaultModelUri);
+    } finally {
+      setIsGeneratingAI(false);
+      setAiProgressMessage('');
     }
   };
 
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
 
-  // Re-drape when component mounts or original photo changes
+  // Trigger Photoreal AI try-on when component mounts or person photo changes
   useEffect(() => {
     if (!tryonResultUri || tryonResultUri === defaultModelUri) {
-      updateDrapedImage(currentPersonPhoto, currentSize, tuningOptions);
+      generatePhotorealTryon(currentPersonPhoto, currentSize, tuningOptions);
     }
   }, [currentPersonPhoto, garment]);
 
@@ -135,7 +241,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
       if (dataUrl) {
         kioskAudio.playShutterSound();
         setCurrentPersonPhoto(dataUrl);
-        await updateDrapedImage(dataUrl, currentSize, tuningOptions);
+        await generatePhotorealTryon(dataUrl, currentSize, tuningOptions);
       }
     } catch (err: any) {
       console.error('Photo processing error:', err);
@@ -198,11 +304,20 @@ export const ResultView: React.FC<ResultViewProps> = ({
     return () => window.removeEventListener('paste', handlePaste);
   }, [currentSize, tuningOptions]);
 
+  const handleSaveCalibration = () => {
+    if (garment?.id) {
+      localStorage.setItem(`drape_calibration_${garment.id}`, JSON.stringify(drapeTuning));
+      setCalibrationSaved(true);
+      kioskAudio.playBeep(900, 0.08);
+      setTimeout(() => setCalibrationSaved(false), 2200);
+    }
+  };
+
   const handleSizeChange = async (newSize: string) => {
     kioskAudio.playBeep(800, 0.05);
     setCurrentSize(newSize);
     if (!tryonResultUri || tryonResultUri === defaultModelUri) {
-      await updateDrapedImage(currentPersonPhoto, newSize, tuningOptions);
+      await generatePhotorealTryon(currentPersonPhoto, newSize, tuningOptions);
     }
   };
 
@@ -210,16 +325,24 @@ export const ResultView: React.FC<ResultViewProps> = ({
     const newOptions = { ...tuningOptions, ...updated };
     setTuningOptions(newOptions);
     if (!tryonResultUri || tryonResultUri === defaultModelUri) {
-      await updateDrapedImage(currentPersonPhoto, currentSize, newOptions);
+      await generatePhotorealTryon(currentPersonPhoto, currentSize, newOptions);
     }
   };
 
   const handleResetTuning = async () => {
     kioskAudio.playBeep(600, 0.05);
-    const defaults = { offsetX: 0, offsetY: 0, scale: 1.0, opacity: 0.96, ambience };
-    setTuningOptions(defaults);
+    const defaults = {
+      offsetX: 0,
+      offsetY: 0,
+      widthScale: 1.00,
+      lengthScale: 1.00,
+      shoulderExpand: 1.45,
+    };
+    setDrapeTuning(defaults);
+    const legacyDefaults = { offsetX: 0, offsetY: 0, scale: 1.0, opacity: 0.96, ambience };
+    setTuningOptions(legacyDefaults);
     if (!tryonResultUri || tryonResultUri === defaultModelUri) {
-      await updateDrapedImage(currentPersonPhoto, currentSize, defaults);
+      await generatePhotorealTryon(currentPersonPhoto, currentSize, legacyDefaults);
     }
   };
 
@@ -228,9 +351,8 @@ export const ResultView: React.FC<ResultViewProps> = ({
     setAmbience(newAmbience);
     const updated = { ...tuningOptions, ambience: newAmbience };
     setTuningOptions(updated);
-    // Preserves photoreal model image; lighting grade is dynamically applied via ambienceFilterClass
     if (!tryonResultUri || tryonResultUri === defaultModelUri) {
-      await updateDrapedImage(currentPersonPhoto, currentSize, updated);
+      await generatePhotorealTryon(currentPersonPhoto, currentSize, updated);
     }
   };
 
@@ -393,6 +515,22 @@ export const ResultView: React.FC<ResultViewProps> = ({
               <div className="absolute inset-0 bg-indigo-900/60 backdrop-blur-xs flex flex-col items-center justify-center text-white z-30 pointer-events-none">
                 <Upload className="w-12 h-12 mb-2 animate-bounce" />
                 <span className="text-base font-bold">Drop your photo here to wear this outfit!</span>
+              </div>
+            )}
+
+            {/* AI Try-on Generating Overlay (Mode B IDM-VTON) */}
+            {isGeneratingAI && (
+              <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-md z-30 flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+                <div className="relative mb-4">
+                  <div className="w-16 h-16 rounded-full border-4 border-indigo-400/30 border-t-indigo-500 animate-spin" />
+                  <Sparkles className="w-6 h-6 text-indigo-400 absolute inset-0 m-auto animate-pulse" />
+                </div>
+                <div className="text-white font-extrabold text-base tracking-wide mb-1">
+                  Generating Photoreal AI Try-On (IDM-VTON)
+                </div>
+                <div className="text-xs text-indigo-200 font-mono max-w-sm">
+                  {aiProgressMessage || 'Harmonizing fabric drape, lighting & body contours...'}
+                </div>
               </div>
             )}
 
@@ -664,21 +802,34 @@ export const ResultView: React.FC<ResultViewProps> = ({
               </button>
             </div>
 
-            {/* Interactive Precision Drape Tuner Drawer */}
+            {/* Interactive Precision Drape Tuner Drawer (TASK 7) */}
             {showFitTuner && (
-              <div className="absolute bottom-16 right-4 w-80 spatial-glass border border-white/95 p-4 rounded-3xl shadow-2xl z-30 text-xs animate-fade-in">
+              <div className="absolute bottom-16 right-4 w-84 spatial-glass border border-white/95 p-4 rounded-3xl shadow-2xl z-30 text-xs animate-fade-in max-h-[80vh] overflow-y-auto">
                 <div className="flex items-center justify-between mb-3 border-b border-slate-300 pb-2">
                   <span className="font-bold text-slate-900 flex items-center gap-1.5">
                     <Sliders className="w-3.5 h-3.5 text-indigo-700" />
                     <span>Drape & Size Calibration</span>
                   </span>
-                  <button
-                    onClick={handleResetTuning}
-                    className="text-[10px] text-slate-600 hover:text-slate-900 flex items-center gap-1 font-bold"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    <span>Reset</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleResetTuning}
+                      className="text-[10px] text-slate-600 hover:text-slate-900 flex items-center gap-1 font-bold"
+                      title="Reset to default calibration"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Reset</span>
+                    </button>
+                    <button
+                      onClick={handleSaveCalibration}
+                      className={`text-[10px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1 transition-all ${
+                        calibrationSaved
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs'
+                      }`}
+                    >
+                      <span>{calibrationSaved ? 'Saved!' : 'Save Calibration'}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Instant Size Selector */}
@@ -704,19 +855,120 @@ export const ResultView: React.FC<ResultViewProps> = ({
                   </div>
                 </div>
 
-                {/* Scale Slider */}
+                {/* Slider 1: Offset X (-20 to +20px) */}
                 <div className="mb-2.5">
                   <div className="flex justify-between text-[11px] text-slate-700 font-semibold mb-1">
-                    <span>Garment Silhouette Scale</span>
-                    <span className="font-mono text-indigo-800 font-bold">{Math.round((tuningOptions.scale || 1.0) * 100)}%</span>
+                    <span>Offset X (Horizontal)</span>
+                    <span className="font-mono text-indigo-800 font-bold">
+                      {drapeTuning.offsetX > 0 ? `+${drapeTuning.offsetX}px` : `${drapeTuning.offsetX}px`}
+                    </span>
                   </div>
                   <input
                     type="range"
-                    min="0.80"
-                    max="1.25"
+                    min="-20"
+                    max="20"
+                    step="1"
+                    value={drapeTuning.offsetX}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      const updated = { ...drapeTuning, offsetX: val };
+                      setDrapeTuning(updated);
+                      handleTuningChange({ offsetX: val });
+                    }}
+                    className="w-full accent-indigo-600 cursor-pointer"
+                  />
+                </div>
+
+                {/* Slider 2: Offset Y (-20 to +20px) */}
+                <div className="mb-2.5">
+                  <div className="flex justify-between text-[11px] text-slate-700 font-semibold mb-1">
+                    <span>Offset Y (Vertical)</span>
+                    <span className="font-mono text-indigo-800 font-bold">
+                      {drapeTuning.offsetY > 0 ? `+${drapeTuning.offsetY}px` : `${drapeTuning.offsetY}px`}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-20"
+                    max="20"
+                    step="1"
+                    value={drapeTuning.offsetY}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      const updated = { ...drapeTuning, offsetY: val };
+                      setDrapeTuning(updated);
+                      handleTuningChange({ offsetY: val });
+                    }}
+                    className="w-full accent-indigo-600 cursor-pointer"
+                  />
+                </div>
+
+                {/* Slider 3: Width Scale (0.90 to 1.10) */}
+                <div className="mb-2.5">
+                  <div className="flex justify-between text-[11px] text-slate-700 font-semibold mb-1">
+                    <span>Width Scale</span>
+                    <span className="font-mono text-indigo-800 font-bold">
+                      {Math.round(drapeTuning.widthScale * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.90"
+                    max="1.10"
                     step="0.01"
-                    value={tuningOptions.scale || 1.0}
-                    onChange={(e) => handleTuningChange({ scale: Number(e.target.value) })}
+                    value={drapeTuning.widthScale}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      const updated = { ...drapeTuning, widthScale: val };
+                      setDrapeTuning(updated);
+                      handleTuningChange({ scale: val });
+                    }}
+                    className="w-full accent-indigo-600 cursor-pointer"
+                  />
+                </div>
+
+                {/* Slider 4: Length Scale (0.90 to 1.15) */}
+                <div className="mb-2.5">
+                  <div className="flex justify-between text-[11px] text-slate-700 font-semibold mb-1">
+                    <span>Length Scale</span>
+                    <span className="font-mono text-indigo-800 font-bold">
+                      {Math.round(drapeTuning.lengthScale * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.90"
+                    max="1.15"
+                    step="0.01"
+                    value={drapeTuning.lengthScale}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      const updated = { ...drapeTuning, lengthScale: val };
+                      setDrapeTuning(updated);
+                    }}
+                    className="w-full accent-indigo-600 cursor-pointer"
+                  />
+                </div>
+
+                {/* Slider 5: Shoulder Expand (1.30 to 1.70) */}
+                <div className="mb-2.5">
+                  <div className="flex justify-between text-[11px] text-slate-700 font-semibold mb-1">
+                    <span>Shoulder Expand</span>
+                    <span className="font-mono text-indigo-800 font-bold">
+                      {drapeTuning.shoulderExpand.toFixed(2)}x
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1.30"
+                    max="1.70"
+                    step="0.01"
+                    value={drapeTuning.shoulderExpand}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      const updated = { ...drapeTuning, shoulderExpand: val };
+                      setDrapeTuning(updated);
+                    }}
                     className="w-full accent-indigo-600 cursor-pointer"
                   />
                 </div>

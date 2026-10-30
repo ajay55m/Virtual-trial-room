@@ -15,12 +15,64 @@ export interface PoseGateEvaluation {
     minY: number;
     maxY: number;
   };
+  suggestPhotoreal?: boolean;
+  blockModeA?: boolean;
+  medianSize?: string;
+  chestMedianCm?: number;
+  waistMedianCm?: number;
+  shoulderMedianCm?: number;
 }
 
 class PoseLandmarkerService {
   private landmarker: PoseLandmarker | null = null;
   private initializingPromise: Promise<PoseLandmarker> | null = null;
   private lastVideoTime = -1;
+
+  // Running 30-frame buffer for stable median size estimation (TASK 1)
+  private sizeHistoryBuffer: Array<{
+    chestCm: number;
+    waistCm: number;
+    shoulderCm: number;
+  }> = [];
+
+  private calculateMedian(vals: number[]): number {
+    if (vals.length === 0) return 0;
+    const sorted = [...vals].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  public getMedianSize(_userHeightCm: number = 175.0, category: string = 'Shirt'): {
+    size: string;
+    chestCm: number;
+    waistCm: number;
+    shoulderCm: number;
+  } {
+    if (this.sizeHistoryBuffer.length === 0) {
+      return { size: 'M', chestCm: 94.0, waistCm: 78.0, shoulderCm: 44.0 };
+    }
+    const chestMed = this.calculateMedian(this.sizeHistoryBuffer.map(b => b.chestCm));
+    const waistMed = this.calculateMedian(this.sizeHistoryBuffer.map(b => b.waistCm));
+    const shMed = this.calculateMedian(this.sizeHistoryBuffer.map(b => b.shoulderCm));
+
+    let size = 'M';
+    if (chestMed < 91) size = 'S';
+    else if (chestMed < 97) size = 'M';
+    else if (chestMed < 102) size = 'L';
+    else if (chestMed < 107) size = 'XL';
+    else size = 'XXL';
+
+    if (category.toLowerCase() === 'saree') {
+      const chestIn = chestMed / 2.54;
+      if (chestIn < 33) size = '32';
+      else if (chestIn < 35) size = '34';
+      else if (chestIn < 37) size = '36';
+      else if (chestIn < 39) size = '38';
+      else size = '40';
+    }
+
+    return { size, chestCm: Math.round(chestMed * 10) / 10, waistCm: Math.round(waistMed * 10) / 10, shoulderCm: Math.round(shMed * 10) / 10 };
+  }
 
   async init(): Promise<PoseLandmarker> {
     if (this.landmarker) return this.landmarker;
@@ -164,13 +216,28 @@ class PoseLandmarkerService {
       return v >= threshold;
     };
 
-    // 2. Required Landmarks for Category
-    // Shoulders: 11 (left), 12 (right)
-    const shouldersVis = isVis(11, 0.5) && isVis(12, 0.5);
-    // Hips: 23 (left), 24 (right)
-    const hipsVis = isVis(23, 0.5) && isVis(24, 0.5);
-    // Ankles: 27 (left), 28 (right)
-    const anklesVis = isVis(27, 0.5) && isVis(28, 0.5);
+    // 2. Required Landmarks for Category - Threshold >= 0.80 (TASK 1)
+    const vis11 = isVis(11, 0.80);
+    const vis12 = isVis(12, 0.80);
+    const vis23 = isVis(23, 0.80);
+    const vis24 = isVis(24, 0.80);
+    const shouldersVis = vis11 && vis12;
+    const hipsVis = vis23 && vis24;
+    const anklesVis = isVis(27, 0.70) && isVis(28, 0.70);
+
+    // Compute dimensions
+    const dxSh = lm[12].x - lm[11].x;
+    const dySh = lm[12].y - lm[11].y;
+    const shoulderWidth = Math.hypot(dxSh, dySh);
+    const torsoMidTopX = (lm[11].x + lm[12].x) / 2;
+    const torsoMidTopY = (lm[11].y + lm[12].y) / 2;
+    const torsoMidBotX = (lm[23].x + lm[24].x) / 2;
+    const torsoMidBotY = (lm[23].y + lm[24].y) / 2;
+    const torsoHeight = Math.max(0.01, Math.hypot(torsoMidBotX - torsoMidTopX, torsoMidBotY - torsoMidTopY));
+    const rotationRatio = shoulderWidth / torsoHeight;
+
+    // Shoulder tilt angle in degrees
+    const shoulderTiltDeg = Math.abs(Math.atan2(Math.abs(dySh), Math.max(1e-4, Math.abs(dxSh))) * (180 / Math.PI));
 
     // Compute vertical height of person from landmarks
     const detectedY = lm
@@ -188,17 +255,11 @@ class PoseLandmarkerService {
       centerOffset = Math.round(Math.abs(torsoCenterX - 0.5) * 100);
     }
 
-    // Shoulder angle / yaw proxy
-    let shoulderYaw = 0;
-    if (shouldersVis) {
-      shoulderYaw = Math.round(Math.abs(lm[11].y - lm[12].y) * 100);
-    }
-
     const metrics: PoseQualityMetrics = {
       sharpnessVariance: 480,
       bodyHeightPercent,
       horizontalCenterOffset: centerOffset,
-      shoulderYawDegrees: shoulderYaw,
+      shoulderYawDegrees: Math.round(shoulderTiltDeg),
       personCount: 1,
       aPoseCompliant: false,
       stabilityTimeSec: stabilityTime
@@ -206,13 +267,13 @@ class PoseLandmarkerService {
 
     const reasons: string[] = [];
 
-    // Check Shoulders
-    if (!shouldersVis) {
-      reasons.push('SHOULDERS_NOT_VISIBLE');
+    // Check 1: Key Landmark Visibility >= 0.80 (TASK 1)
+    if (!shouldersVis || !hipsVis) {
+      reasons.push('LOW_LANDMARK_VISIBILITY');
       return {
         passed: false,
-        guidance: 'Step back — show shoulders',
-        subGuidance: 'Both shoulders must be clearly visible in frame',
+        guidance: 'Stand in Clear View',
+        subGuidance: `Shoulder & hip landmark visibility must be ≥ 80% (Current: 11=${(lm[11].visibility ?? 1).toFixed(2)}, 12=${(lm[12].visibility ?? 1).toFixed(2)})`,
         reasons,
         metrics,
         landmarks: lm,
@@ -220,13 +281,58 @@ class PoseLandmarkerService {
       };
     }
 
-    // Check Hips / Torso
-    if (!hipsVis) {
-      reasons.push('TORSO_HIPS_NOT_VISIBLE');
+    // Check 2: Side / 3-4 Angle (Body Rotation) Detection (TASK 1 & ROOT RULE)
+    // Frontal body ratio is typically 0.85-1.30. Side / 3-4 poses drop below 0.65.
+    if (rotationRatio < 0.65) {
+      reasons.push('SIDE_OR_ROTATED_POSE');
+      return {
+        passed: false,
+        guidance: 'Please use Photoreal Mode for this photo',
+        subGuidance: 'Side / 3-4 angle detected. Mode A Live Drape is strictly for front-facing preview.',
+        reasons,
+        metrics,
+        landmarks: lm,
+        allPosesCount: 1,
+        suggestPhotoreal: true,
+        blockModeA: true
+      };
+    }
+
+    // Check 3: Excessive Shoulder Tilt Angle > 12 degrees (TASK 1)
+    if (shoulderTiltDeg > 12.0) {
+      reasons.push('SHOULDER_TILT_EXCESSIVE');
+      return {
+        passed: false,
+        guidance: 'Level your shoulders',
+        subGuidance: `Shoulder tilt is ${Math.round(shoulderTiltDeg)}° (maximum 12° allowed). Please stand straight facing camera.`,
+        reasons,
+        metrics,
+        landmarks: lm,
+        allPosesCount: 1
+      };
+    }
+
+    // Check 4: Person Too Close: shoulder_width > 45% of frame width (TASK 1)
+    if (shoulderWidth > 0.45) {
+      reasons.push('PERSON_TOO_CLOSE');
       return {
         passed: false,
         guidance: 'Step back',
-        subGuidance: 'Torso and waist must be visible to fit tops and outfits',
+        subGuidance: `Shoulder width spans ${Math.round(shoulderWidth * 100)}% of frame width (maximum 45% allowed).`,
+        reasons,
+        metrics,
+        landmarks: lm,
+        allPosesCount: 1
+      };
+    }
+
+    // Check 5: Person Too Far: shoulder_width < 15% of frame width (TASK 1)
+    if (shoulderWidth < 0.15) {
+      reasons.push('PERSON_TOO_FAR');
+      return {
+        passed: false,
+        guidance: 'Step closer to camera',
+        subGuidance: `Shoulder width spans ${Math.round(shoulderWidth * 100)}% of frame width (minimum 15% required).`,
         reasons,
         metrics,
         landmarks: lm,
@@ -248,28 +354,12 @@ class PoseLandmarkerService {
       };
     }
 
-    // 3. Person fills less than 60% of the frame height
-    if (bodyHeightPercent < 60) {
-      reasons.push('PERSON_TOO_SMALL');
-      return {
-        passed: false,
-        guidance: 'Step closer to camera',
-        subGuidance: `Person fills ${bodyHeightPercent}% of frame (minimum 60% required)`,
-        reasons,
-        metrics,
-        landmarks: lm,
-        allPosesCount: 1
-      };
-    }
-
-    // 4. Hand covering the torso check
-    // Torso box: Top = shoulders, Bottom = hips, Left/Right = shoulders & hips
+    // Check 6: Hand covering the torso check (TASK 1)
     const torsoTopY = Math.min(lm[11].y, lm[12].y);
     const torsoBottomY = Math.max(lm[23].y, lm[24].y);
     const rawMinX = Math.min(lm[11].x, lm[12].x, lm[23].x, lm[24].x);
     const rawMaxX = Math.max(lm[11].x, lm[12].x, lm[23].x, lm[24].x);
 
-    // Inset X by 10% so natural arm drop at sides is not flagged
     const insetX = (rawMaxX - rawMinX) * 0.10;
     const torsoMinX = rawMinX + insetX;
     const torsoMaxX = rawMaxX - insetX;
@@ -281,7 +371,6 @@ class PoseLandmarkerService {
       maxY: torsoBottomY
     };
 
-    // Hand landmark indices: wrists (15, 16), pinky (17, 18), index (19, 20), thumb (21, 22)
     const handIndices = [15, 16, 17, 18, 19, 20, 21, 22];
     const handOnTorso = handIndices.some((idx) => {
       const pt = lm[idx];
@@ -298,27 +387,48 @@ class PoseLandmarkerService {
       reasons.push('HAND_COVERING_TORSO');
       return {
         passed: false,
-        guidance: 'Lower your phone',
-        subGuidance: 'Keep your hands and phone away from your chest and torso',
+        guidance: 'Please use Photoreal Mode for this photo',
+        subGuidance: 'Hands in front of torso / pocket detected. Live Mode A requires clear torso.',
         reasons,
         metrics,
         landmarks: lm,
         allPosesCount: 1,
-        torsoRect
+        torsoRect,
+        suggestPhotoreal: true,
+        blockModeA: true
       };
     }
+
+    // Calculate rolling 30-frame median metric body size (TASK 1)
+    const userHeight = 175.0;
+    const personPx = Math.max(0.2, bodyHeight);
+    const scale = userHeight / (personPx * 1000);
+    const shCm = shoulderWidth * 1000 * scale;
+    const chCm = shCm * 2.3;
+    const hipDist = Math.hypot(lm[24].x - lm[23].x, lm[24].y - lm[23].y);
+    const wstCm = hipDist * 1000 * scale * 2.1;
+
+    this.sizeHistoryBuffer.push({ chestCm: chCm, waistCm: wstCm, shoulderCm: shCm });
+    if (this.sizeHistoryBuffer.length > 30) {
+      this.sizeHistoryBuffer.shift();
+    }
+    const medianData = this.getMedianSize(userHeight, category);
 
     // All checks PASSED!
     metrics.aPoseCompliant = true;
     return {
       passed: true,
       guidance: 'Pose Verified — Ready to Capture',
-      subGuidance: 'Torso clear and optimal framing achieved',
+      subGuidance: `Optimal frontal framing achieved. Median Size: ${medianData.size} (Chest ${medianData.chestCm}cm)`,
       reasons: [],
       metrics,
       landmarks: lm,
       allPosesCount: 1,
-      torsoRect
+      torsoRect,
+      medianSize: medianData.size,
+      chestMedianCm: medianData.chestCm,
+      waistMedianCm: medianData.waistCm,
+      shoulderMedianCm: medianData.shoulderCm
     };
   }
 }

@@ -1,0 +1,65 @@
+{
+  "sku": "EMR-EVE-GWN-08",
+  "name": "Emerald Evening Gown",
+  "category": "overall",
+  "aspect_ratio": 0.7467,
+  "neckline_center": [
+    0.5,
+    0.09
+  ],
+  "left_shoulder": [
+    0.37,
+    0.12
+  ],
+  "right_shoulder": [
+    0.62,
+    0.12
+  ],
+  "hem_center": [
+    0.6,
+    0.96
+  ],
+  "bbox": [
+    0.2,
+    0.06,
+    0.81,
+    0.96
+  ],
+  "id": "dress1",
+  "type": "long_upper",
+  "fit_factor": 1.35,
+  "anchors": {
+    "neck_left": [
+      0.43,
+      0.08
+    ],
+    "neck_right": [
+      0.57,
+      0.08
+    ],
+    "shoulder_left": [
+      0.22,
+      0.13
+    ],
+    "shoulder_right": [
+      0.78,
+      0.13
+    ],
+    "armpit_left": [
+      0.26,
+      0.35
+    ],
+    "armpit_right": [
+      0.74,
+      0.35
+    ],
+    "hem_left": [
+      0.18,
+      0.96
+    ],
+    "hem_right": [
+      0.82,
+      0.96
+    ]
+  }
+}
