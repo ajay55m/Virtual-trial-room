@@ -306,6 +306,24 @@ def generate_occlusion_mask(landmarks: list, img_h: int, img_w: int, shoulder_di
     return cv2.GaussianBlur(mask, (9, 9), 0)
 
 
+def _alpha_composite(bg_rgba: np.ndarray, fg_rgba: np.ndarray) -> np.ndarray:
+    """Combines two RGBA images using Porter-Duff source-over compositing."""
+    fg_a = fg_rgba[:, :, 3].astype(np.float32) / 255.0
+    bg_a = bg_rgba[:, :, 3].astype(np.float32) / 255.0
+    out_a = fg_a + bg_a * (1.0 - fg_a)
+    out_rgb = np.zeros_like(fg_rgba[:, :, :3], dtype=np.float32)
+    valid = out_a > 1e-4
+    for c in range(3):
+        out_rgb[:, :, c][valid] = (
+            fg_rgba[:, :, c].astype(np.float32)[valid] * fg_a[valid] +
+            bg_rgba[:, :, c].astype(np.float32)[valid] * bg_a[valid] * (1.0 - fg_a[valid])
+        ) / out_a[valid]
+    out = np.zeros_like(fg_rgba)
+    out[:, :, :3] = np.clip(out_rgb, 0, 255).astype(np.uint8)
+    out[:, :, 3] = np.clip(out_a * 255.0, 0, 255).astype(np.uint8)
+    return out
+
+
 def warp_garment_perspective(
     frame: np.ndarray,
     garment_rgba: np.ndarray,
@@ -315,6 +333,10 @@ def warp_garment_perspective(
     """
     Warps garment PNG to person using 4-point perspective transform, rotation angle,
     lighting match, and face/hand occlusion masking.
+    For sarees, implements special multi-layer draping:
+    - Base blouse across upper torso
+    - Flared skirt warped down to ankles (landmarks 27 & 28)
+    - Diagonal pallu strip running from Right Shoulder (12) across to Left Hip (23)
     """
     img_h, img_w = frame.shape[:2]
     g_h, g_w = garment_rgba.shape[:2]
@@ -365,16 +387,76 @@ def warp_garment_perspective(
     dst_br = [mid_bot_x + (bot_w / 2.0) * ux, mid_bot_y + (bot_w / 2.0) * uy]
     dst_bl = [mid_bot_x - (bot_w / 2.0) * ux, mid_bot_y - (bot_w / 2.0) * uy]
 
-    dst_pts = np.float32([dst_tl, dst_tr, dst_br, dst_bl])
-    src_pts = np.float32([[0, 0], [g_w, 0], [g_w, g_h], [0, g_h]])
+    if g_type == "saree":
+        # SAREE SPECIAL:
+        # 1. Warp bottom part till ankle (landmarks 27 & 28)
+        # 2. Warp base blouse across upper torso
+        # 3. Draw pallu as diagonal warped strip from Right Shoulder(12) to Left Hip(23)
+        # Do not paste saree as a normal shirt!
+        mid_hip_x = (landmarks[23][0] + landmarks[24][0]) * img_w / 2.0
+        mid_hip_y = (landmarks[23][1] + landmarks[24][1]) * img_h / 2.0
 
-    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-    warped_rgba = cv2.warpPerspective(
-        garment_rgba, M, (img_w, img_h),
-        flags=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_CONSTANT,
-        borderValue=(0, 0, 0, 0)
-    )
+        ankle_l_y = landmarks[27][1] * img_h
+        ankle_r_y = landmarks[28][1] * img_h
+        mid_ankle_x = (landmarks[27][0] + landmarks[28][0]) * img_w / 2.0
+        mid_ankle_y = (ankle_l_y + ankle_r_y) / 2.0
+        if mid_ankle_y < mid_hip_y + shoulder_dist:
+            mid_ankle_y = min(float(img_h), mid_hip_y + shoulder_dist * 2.8)
+            mid_ankle_x = mid_hip_x
+
+        skirt_top_w = shoulder_dist * 0.95
+        dst_skirt_tl = [mid_hip_x - (skirt_top_w / 2.0) * ux, mid_hip_y - (skirt_top_w / 2.0) * uy]
+        dst_skirt_tr = [mid_hip_x + (skirt_top_w / 2.0) * ux, mid_hip_y + (skirt_top_w / 2.0) * uy]
+        dst_skirt_br = [mid_ankle_x + (target_width / 2.0) * ux, mid_ankle_y + (target_width / 2.0) * uy]
+        dst_skirt_bl = [mid_ankle_x - (target_width / 2.0) * ux, mid_ankle_y - (target_width / 2.0) * uy]
+        src_skirt = np.float32([[0, int(g_h * 0.30)], [g_w, int(g_h * 0.30)], [g_w, g_h], [0, g_h]])
+        dst_skirt = np.float32([dst_skirt_tl, dst_skirt_tr, dst_skirt_br, dst_skirt_bl])
+        M_skirt = cv2.getPerspectiveTransform(src_skirt, dst_skirt)
+        warped_skirt = cv2.warpPerspective(garment_rgba, M_skirt, (img_w, img_h), borderValue=(0, 0, 0, 0))
+
+        # Base blouse / bodice across torso
+        blouse_w = shoulder_dist * 1.15
+        dst_blouse_tl = [mid_top_x - (blouse_w / 2.0) * ux, mid_top_y - (blouse_w / 2.0) * uy]
+        dst_blouse_tr = [mid_top_x + (blouse_w / 2.0) * ux, mid_top_y + (blouse_w / 2.0) * uy]
+        dst_blouse_br = [mid_hip_x + (skirt_top_w / 2.0) * ux, mid_hip_y + (skirt_top_w / 2.0) * uy]
+        dst_blouse_bl = [mid_hip_x - (skirt_top_w / 2.0) * ux, mid_hip_y - (skirt_top_w / 2.0) * uy]
+        src_blouse = np.float32([[0, 0], [g_w, 0], [g_w, int(g_h * 0.35)], [0, int(g_h * 0.35)]])
+        dst_blouse = np.float32([dst_blouse_tl, dst_blouse_tr, dst_blouse_br, dst_blouse_bl])
+        M_blouse = cv2.getPerspectiveTransform(src_blouse, dst_blouse)
+        warped_blouse = cv2.warpPerspective(garment_rgba, M_blouse, (img_w, img_h), borderValue=(0, 0, 0, 0))
+
+        # Pallu: diagonal warped strip from Right Shoulder (12) to Left Hip (23)
+        p12 = np.array([landmarks[12][0] * img_w, landmarks[12][1] * img_h], dtype=np.float32)
+        p23 = np.array([landmarks[23][0] * img_w, landmarks[23][1] * img_h], dtype=np.float32)
+        v_p = p23 - p12
+        len_p = float(np.hypot(v_p[0], v_p[1]))
+        u_p = v_p / max(1.0, len_p)
+        norm_p = np.array([-u_p[1], u_p[0]], dtype=np.float32)
+        pallu_w = shoulder_dist * 0.48
+        p_start = p12 - u_p * (shoulder_dist * 0.12)
+        p_end = p23 + u_p * (shoulder_dist * 0.15)
+        dst_pallu = np.float32([
+            p_start - norm_p * (pallu_w / 2.0),
+            p_start + norm_p * (pallu_w / 2.0),
+            p_end + norm_p * (pallu_w / 2.0),
+            p_end - norm_p * (pallu_w / 2.0)
+        ])
+        src_pallu = np.float32([[0, 0], [int(g_w * 0.42), 0], [int(g_w * 0.42), g_h], [0, g_h]])
+        M_pallu = cv2.getPerspectiveTransform(src_pallu, dst_pallu)
+        warped_pallu = cv2.warpPerspective(garment_rgba, M_pallu, (img_w, img_h), borderValue=(0, 0, 0, 0))
+
+        warped_rgba = _alpha_composite(_alpha_composite(warped_blouse, warped_skirt), warped_pallu)
+    else:
+        dst_pts = np.float32([dst_tl, dst_tr, dst_br, dst_bl])
+        src_pts = np.float32([[0, 0], [g_w, 0], [g_w, g_h], [0, g_h]])
+
+        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+        warped_rgba = cv2.warpPerspective(
+            garment_rgba, M, (img_w, img_h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(0, 0, 0, 0)
+        )
 
     # 4. Soft Edge Feathering
     raw_alpha = warped_rgba[:, :, 3].astype(np.float32) / 255.0

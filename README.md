@@ -120,6 +120,87 @@ Double-click or run `.\launch_kiosk.bat` from PowerShell/CMD in the repository r
 
 ---
 
+## 👗 Standalone Python Virtual Try-On Room (`main.py`)
+
+A high-performance **Modular Monolith** virtual try-on engine running directly in Python via OpenCV and MediaPipe without heavyweight web frameworks.
+
+```
+[ OpenCV UI Layer ]
+       │
+       ▼
+[ Garment Catalog Layer ] ➔ Shirt / T-Shirt / Tops / Kurti / Saree
+       │
+       ▼
+[ Input Layer ] ➔ Live Camera OR Uploaded Photo (`--image`, `--height`)
+       │
+       ▼
+[ Body Analysis Layer ] ➔ MediaPipe Pose (33 Landmarks)
+       │
+       ▼
+[ Size Estimation Layer ] ➔ Chest, Waist, Shoulder ➔ S / M / L / XL / XXL
+       │
+       ▼
+[ Realistic Warping Layer ] ➔ Perspective Warp + Smoothing + Lighting + Occlusion
+       │
+       ▼
+[ Render Layer ] ➔ Final Try-On Output & HUD
+```
+
+### 1. Execution & Input Modes
+
+```bash
+# 1. Live Camera Mode (default webcam index 0)
+python main.py
+
+# 2. Static Image Try-On Mode (photo + user height)
+python main.py --image user.jpg --height 175
+```
+*Note: If `--height` is omitted, the terminal prompts for the shopper's height in centimeters (required for metric sizing).*
+
+### 2. Live Interactive Controls
+
+| Key | Action | Description |
+| :---: | :--- | :--- |
+| **`N`** | Next Garment | Cycle to the next garment in the active catalog |
+| **`P`** | Previous Garment | Cycle to the previous garment |
+| **`C`** | Change Category | Jump directly across categories (Shirt ➔ T-Shirt ➔ Tops ➔ Kurti ➔ Saree) |
+| **`S`** | Toggle Size HUD | Show / hide the live chest, waist, and recommended size overlay card |
+| **`Q` / `ESC`** | Quit | Exit the try-on session |
+
+### 3. Integrated Garment Catalog
+
+Built directly into `main.py` using transparent RGBA ghost-mannequin / flat-lay PNGs:
+- **`Zara Slim Shirt`** (Zara, Upper / Shirt)
+- **`Levis T-Shirt`** (Levis, Upper / T-Shirt)
+- **`H&M Women Top`** (H&M, Upper / Tops)
+- **`Biba Kurti`** (Biba, Long Upper / Kurti &mdash; drapes to knees)
+- **`Banarasi Saree`** (Manyavar, Saree &mdash; bottom drapes to ankles with diagonal pallu)
+
+### 4. Advanced Realism & Warping Engine
+
+1. **Rotation Tracking:** Measures shoulder tilt theta = atan2(dy, dx) and aligns garment rotation dynamically.
+2. **4-Point Perspective Warping:** `cv2.getPerspectiveTransform()` maps garment corners directly to anatomical anchors:
+   - Tops (`upper`): anchored from shoulders (11, 12) to hips (23, 24) with width = 1.45 * shoulder distance.
+   - Kurti (`long_upper`): anchored from shoulders to knees (25, 26) with width = 1.35 * shoulder distance.
+   - Saree (`saree`): bottom skirt drapes down to ankles (27, 28) with width = 1.35 * shoulder distance.
+3. **EMA Landmark Smoothing:** Exponential moving average filter (alpha = 0.3: 0.7 * prev + 0.3 * curr) completely eliminates webcam keypoint jitter.
+4. **Soft Edge Feathering:** Gaussian blur (7, 7) on the garment alpha matte eliminates artificial cardboard cut-out edges.
+5. **LAB Color Lighting Match:** Samples person luminance and balances garment L-channel to blend naturally with environmental lighting.
+6. **Segmentation Occlusion:** Builds dynamic masks for face/chin (landmarks 0..10) and foreground hands/wrists/forearms (landmarks 15..22) so they stay naturally **ABOVE** the clothing layer.
+7. **Saree Special Draping:** Multi-layer compositor rendering:
+   - Base bodice across upper torso.
+   - Flared pleat skirt draped down to ankles (landmarks 27 & 28).
+   - Diagonal pallu strip running from Right Shoulder (12) across the torso to Left Hip (23).
+8. **Size Recommendation Engine (`analyze_size`):**
+   - Head-to-ankle pixel span calculates real-world metric scale: scale = height_cm / person_height_px.
+   - Metric chest (shoulder_cm * 2.3) and waist (hip_cm * 2.1).
+   - Standard sizes: S (<91 cm), M (<97 cm), L (<102 cm), XL (<107 cm), XXL (>=107 cm).
+   - Kurti/Tops: Bust sizing.
+   - Saree: Blouse sizing (32, 34, 36, 38, 40).
+
+
+---
+
 ## 🛡️ Capture Gate (Phase 1 Implemented)
 
 The live camera feed evaluates every frame using `@mediapipe/tasks-vision` (`pose_landmarker_lite.task` running on GPU Wasm):
