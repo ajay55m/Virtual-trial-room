@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { KioskState, Garment, PoseQualityMetrics } from './types/kiosk';
+import type { KioskState, Garment, PoseQualityMetrics, BodyMeasurements } from './types/kiosk';
 import { MOCK_GARMENTS } from './data/mockGarments';
 import { Header } from './components/Header';
 import { IdleScreen } from './components/IdleScreen';
@@ -8,6 +8,9 @@ import { PositioningCamera } from './components/PositioningCamera';
 import { ReviewScreen } from './components/ReviewScreen';
 import { CatalogView } from './components/CatalogView';
 import { GeneratingPipeline } from './components/GeneratingPipeline';
+import { FabricSelectGrid } from './components/FabricSelectGrid';
+import { TailorProfileScreen } from './components/TailorProfileScreen';
+import { TailorTapeMeasuringScreen } from './components/TailorTapeMeasuringScreen';
 import { ResultView } from './components/ResultView';
 import { AdminModal } from './components/AdminModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -16,16 +19,42 @@ import { apiService } from './services/api';
 
 export function App() {
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-  const initialScreen = (urlParams?.get('screen')?.toUpperCase() as KioskState) || 'IDLE';
+  // Step 1: Default directly to SELECT_FABRIC catalog grid (or screen query param)
+  const initialScreen = (urlParams?.get('screen')?.toUpperCase() as KioskState) || 'SELECT_FABRIC';
   const initialResult = urlParams?.get('result') || '/assets/captures/perfect_user_tryon.jpg';
 
   const [currentState, setCurrentState] = useState<KioskState>(initialScreen);
   const [sessionId, setSessionId] = useState<string>('');
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
+
+  // User Profile & Biometrics (Step 2)
   const [capturedPhotoUri, setCapturedPhotoUri] = useState<string>('/assets/demo_person_male.jpg');
+  const [userHeightCm, setUserHeightCm] = useState<number>(175);
+  const [userMeasurements, setUserMeasurements] = useState<BodyMeasurements>({
+    heightCm: 175,
+    shoulderCm: 44.0,
+    chestCm: 94.0,
+    waistCm: 78.0,
+    hipCm: 96.0,
+    lengthCm: 71.0,
+    sleeveCm: 62.0,
+  });
+
+  // Selected Garments Feed (Step 1 & Step 3 & Step 4)
+  const [selectedGarmentList, setSelectedGarmentList] = useState<Garment[]>([
+    MOCK_GARMENTS[0], // Sapphire Kadwa Banarasi Brocade Saree
+    MOCK_GARMENTS[3], // Biba Chanderi Silk Kurti Material
+    MOCK_GARMENTS[5], // Zara Slim Fit Shirt Fabric
+  ]);
+  const [selectedGarment, setSelectedGarment] = useState<Garment>(MOCK_GARMENTS[0]);
+  const [selectedSize, setSelectedSize] = useState<string>('M');
+
+  // Generated AI Try-on Results Map (Garment ID -> Result Image URI)
+  const [tryonResultsMap, setTryonResultsMap] = useState<Record<string, string>>({});
   const [tryonResultUri, setTryonResultUri] = useState<string>(initialScreen === 'RESULT' ? initialResult : '');
   const [sizeRecommendation, setSizeRecommendation] = useState<any>(null);
+
   const [poseMetrics, setPoseMetrics] = useState<PoseQualityMetrics>({
     sharpnessVariance: 420,
     bodyHeightPercent: 82,
@@ -35,8 +64,6 @@ export function App() {
     aPoseCompliant: true,
     stabilityTimeSec: 1.0
   });
-  const [selectedGarment, setSelectedGarment] = useState<Garment>(MOCK_GARMENTS[0]);
-  const [selectedSize, setSelectedSize] = useState<string>('M');
 
   // Inactivity timeout counter (default 300s, warns at 15s)
   const [inactivitySec, setInactivitySec] = useState(300);
@@ -71,12 +98,10 @@ export function App() {
     let lastKeyTime = performance.now();
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept if user is typing in form inputs (like email box)
       const targetTag = (e.target as HTMLElement)?.tagName;
       if (targetTag === 'INPUT' || targetTag === 'TEXTAREA') return;
 
       const now = performance.now();
-      // Hardware barcode scanners burst characters within < 60ms
       if (now - lastKeyTime > 120) {
         buffer = '';
       }
@@ -93,10 +118,13 @@ export function App() {
           );
           if (matched) {
             setSelectedGarment(matched);
+            setSelectedGarmentList(prev => 
+              prev.some(x => x.id === matched.id) ? prev : [matched, ...prev]
+            );
             if (currentState === 'IDLE') {
-              handleStartSession();
-            } else if (currentState === 'CATALOG') {
-              handleSelectGarment(matched, 'M');
+              setCurrentState('SELECT_FABRIC');
+            } else if (currentState === 'SELECT_FABRIC') {
+              setCurrentState('CREATE_PROFILE');
             }
           }
         }
@@ -109,9 +137,51 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentState]);
 
+  // Step 1: Toggle garment in multi-selection list
+  const handleToggleGarmentInList = (garment: Garment) => {
+    setSelectedGarmentList((prev) => {
+      const exists = prev.some((g) => g.id === garment.id);
+      if (exists) {
+        if (prev.length === 1) return prev; // Keep at least one
+        return prev.filter((g) => g.id !== garment.id);
+      } else {
+        return [...prev, garment];
+      }
+    });
+  };
+
+  // Step 1 -> Step 2: Proceed from fabric selection to tailor profile
+  const handleProceedToProfile = (selectedList: Garment[]) => {
+    setSelectedGarmentList(selectedList);
+    setSelectedGarment(selectedList[0]);
+    setCurrentState('CREATE_PROFILE');
+  };
+
+  // Step 2 -> Step 3: Complete profile and begin tape measuring & feed generation
+  const handleProfileComplete = (profileData: {
+    photoUri: string;
+    heightCm: number;
+    measurements: BodyMeasurements;
+    size: string;
+  }) => {
+    setCapturedPhotoUri(profileData.photoUri);
+    setUserHeightCm(profileData.heightCm);
+    setUserMeasurements(profileData.measurements);
+    setSelectedSize(profileData.size);
+    setCurrentState('GENERATING_FEED');
+  };
+
+  // Step 3 -> Step 4: All AI try-on renders completed, show final result
+  const handleFeedGenerated = (resultsByGarmentId: Record<string, string>) => {
+    setTryonResultsMap(resultsByGarmentId);
+    if (selectedGarment && resultsByGarmentId[selectedGarment.id]) {
+      setTryonResultUri(resultsByGarmentId[selectedGarment.id]);
+    }
+    setCurrentState('RESULT');
+  };
+
   const handleStartSession = () => {
-    setShowConsentModal(true);
-    setCurrentState('CONSENT');
+    setCurrentState('SELECT_FABRIC');
   };
 
   const handleConsentAgree = async () => {
@@ -150,12 +220,16 @@ export function App() {
   const handleSelectGarment = (garment: Garment, size: string) => {
     setSelectedGarment(garment);
     setSelectedSize(size);
+    setSelectedGarmentList([garment]);
     setCurrentState('GENERATING');
   };
 
   const handleGenerationComplete = (resultImageUrl: string, recommendation?: any) => {
     if (resultImageUrl) {
       setTryonResultUri(resultImageUrl);
+      if (selectedGarment) {
+        setTryonResultsMap(prev => ({ ...prev, [selectedGarment.id]: resultImageUrl }));
+      }
     }
     if (recommendation) {
       setSizeRecommendation(recommendation);
@@ -164,11 +238,11 @@ export function App() {
   };
 
   const handleResetSession = () => {
-    setCurrentState('IDLE');
+    setCurrentState('SELECT_FABRIC');
     setShowConsentModal(false);
     setShowAdminModal(false);
     setInactivitySec(300);
-    setCapturedPhotoUri('/assets/virtualfit_model_tshirt.jpg');
+    setCapturedPhotoUri('/assets/demo_person_male.jpg');
     setTryonResultUri('');
     setSizeRecommendation(null);
   };
@@ -190,6 +264,44 @@ export function App() {
             <IdleScreen onStart={handleStartSession} />
           )}
 
+          {/* ============================================================== */}
+          {/* STEP 1: SELECT FABRIC / DRESS (Attractive Video-Grid Catalog) */}
+          {/* ============================================================== */}
+          {currentState === 'SELECT_FABRIC' && (
+            <FabricSelectGrid
+              selectedGarments={selectedGarmentList}
+              onToggleGarment={handleToggleGarmentInList}
+              onProceedToProfile={handleProceedToProfile}
+            />
+          )}
+
+          {/* ============================================================== */}
+          {/* STEP 2: CREATE PROFILE (Silhouette Guide & Live Measurements)  */}
+          {/* ============================================================== */}
+          {currentState === 'CREATE_PROFILE' && (
+            <TailorProfileScreen
+              initialPhotoUri={capturedPhotoUri}
+              initialHeightCm={userHeightCm}
+              onProfileComplete={handleProfileComplete}
+              onBackToFabrics={() => setCurrentState('SELECT_FABRIC')}
+            />
+          )}
+
+          {/* ============================================================== */}
+          {/* STEP 3: GENERATING YOUR FEED (Dynamic Tailor Tape Animation)   */}
+          {/* ============================================================== */}
+          {currentState === 'GENERATING_FEED' && (
+            <TailorTapeMeasuringScreen
+              photoUri={capturedPhotoUri}
+              heightCm={userHeightCm}
+              measurements={userMeasurements}
+              recommendedSize={selectedSize}
+              selectedGarments={selectedGarmentList}
+              onComplete={handleFeedGenerated}
+            />
+          )}
+
+          {/* Legacy Positioning & Capture Screens (Supported) */}
           {currentState === 'POSITIONING' && (
             <PositioningCamera
               onCaptured={handlePhotoCaptured}
@@ -224,20 +336,30 @@ export function App() {
               garment={selectedGarment}
               selectedSize={selectedSize}
               onComplete={handleGenerationComplete}
-              onCancel={() => setCurrentState('CATALOG')}
+              onCancel={() => setCurrentState('SELECT_FABRIC')}
             />
           )}
 
+          {/* ============================================================== */}
+          {/* STEP 4 & 5: FINAL TRY-ON RESULT & CURATED FOR YOU             */}
+          {/* ============================================================== */}
           {currentState === 'RESULT' && (
             <ResultView
               sessionId={sessionId}
               originalPhotoUri={capturedPhotoUri}
               tryonResultUri={tryonResultUri}
               sizeRecommendation={sizeRecommendation}
-              garment={selectedGarment}
+              garment={selectedGarmentList[0] || selectedGarment}
+              selectedGarments={selectedGarmentList}
+              tryonResultsMap={tryonResultsMap}
+              userMeasurements={userMeasurements}
+              userHeightCm={userHeightCm}
               selectedSize={selectedSize}
-              onTryAnother={() => setCurrentState('CATALOG')}
+              onTryAnother={() => setCurrentState('SELECT_FABRIC')}
               onFinishSession={handleResetSession}
+              onAddGarmentToFeed={(newGarment) => {
+                setSelectedGarmentList(prev => [...prev, newGarment]);
+              }}
             />
           )}
         </ErrorBoundary>

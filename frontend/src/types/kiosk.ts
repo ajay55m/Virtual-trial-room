@@ -1,5 +1,8 @@
 export type KioskState =
   | 'IDLE'
+  | 'SELECT_FABRIC'
+  | 'CREATE_PROFILE'
+  | 'GENERATING_FEED'
   | 'CONSENT'
   | 'POSITIONING'
   | 'CAPTURE'
@@ -29,6 +32,9 @@ export interface Garment {
   name: string;
   brand: string;
   category: 'Upper' | 'Lower' | 'Dress' | 'Outerwear' | 'Saree' | 'Menswear' | 'Head' | 'Foot' | 'Pants' | 'Top Body' | 'Full body';
+  fabricType?: 'Shirt Fabric' | 'Kurti Material' | 'Saree' | 'Tops' | string;
+  fabricCloseupImage?: string;
+  weaveDetail?: string;
   collection?: string;
   gender?: 'Women' | 'Men' | 'Unisex';
   price: string;
@@ -54,6 +60,8 @@ export interface BodyMeasurements {
   hipCm: number;
   shoulderCm: number;
   heightCm: number;
+  lengthCm?: number;
+  sleeveCm?: number;
   chestRange?: string;
   waistRange?: string;
   hipRange?: string;
@@ -69,7 +77,6 @@ export interface SizeRecommendation {
   honestyWarning?: string; // Honesty rule alert if size fit differs from visual image
   measurementBreakdown: BodyMeasurements;
 }
-
 
 export interface PoseQualityMetrics {
   sharpnessVariance: number;
@@ -134,5 +141,3 @@ export interface SAMSegmentationResponse {
     resolution: string;
   };
 }
-
-
