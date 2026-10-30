@@ -86,7 +86,6 @@ class PoseDetector:
         if not MP_AVAILABLE:
             return
 
-        # Model resolution
         model_paths = [
             "frontend/public/models/pose_landmarker_lite.task",
             os.path.join(os.path.dirname(__file__), "frontend/public/models/pose_landmarker_lite.task"),
@@ -133,29 +132,33 @@ def analyze_size(landmarks, img_h: int, img_w: int, user_height_cm: float, categ
     """
     Analyzes body landmarks, calculates human proportions, and estimates garment size.
     """
-    # Head landmark (0: nose)
-    head_y = landmarks[0].y * img_h
-    # Ankle landmarks (27: right, 28: left)
-    ankle_y = max(landmarks[27].y, landmarks[28].y) * img_h
+    head_y = landmarks[0].y * img_h if hasattr(landmarks[0], 'y') else landmarks[0][1] * img_h
+    ankle_lm_27_y = landmarks[27].y if hasattr(landmarks[27], 'y') else landmarks[27][1]
+    ankle_lm_28_y = landmarks[28].y if hasattr(landmarks[28], 'y') else landmarks[28][1]
+    ankle_y = max(ankle_lm_27_y, ankle_lm_28_y) * img_h
     person_height_px = max(60.0, abs(ankle_y - head_y))
 
-    # Real-world scale factor (cm per pixel)
     scale = user_height_cm / person_height_px
 
-    # Distance between shoulders (11: right shoulder, 12: left shoulder)
-    dx_sh = (landmarks[12].x - landmarks[11].x) * img_w
-    dy_sh = (landmarks[12].y - landmarks[11].y) * img_h
-    shoulder_cm = np.hypot(dx_sh, dy_sh) * scale
+    lm11_x = landmarks[11].x if hasattr(landmarks[11], 'x') else landmarks[11][0]
+    lm11_y = landmarks[11].y if hasattr(landmarks[11], 'y') else landmarks[11][1]
+    lm12_x = landmarks[12].x if hasattr(landmarks[12], 'x') else landmarks[12][0]
+    lm12_y = landmarks[12].y if hasattr(landmarks[12], 'y') else landmarks[12][1]
 
-    # Approximate chest circumference
+    dx_sh = (lm12_x - lm11_x) * img_w
+    dy_sh = (lm12_y - lm11_y) * img_h
+    shoulder_cm = np.hypot(dx_sh, dy_sh) * scale
     chest_cm = shoulder_cm * 2.3
 
-    # Distance between hips (23: right hip, 24: left hip)
-    dx_w = (landmarks[24].x - landmarks[23].x) * img_w
-    dy_w = (landmarks[24].y - landmarks[23].y) * img_h
+    lm23_x = landmarks[23].x if hasattr(landmarks[23], 'x') else landmarks[23][0]
+    lm23_y = landmarks[23].y if hasattr(landmarks[23], 'y') else landmarks[23][1]
+    lm24_x = landmarks[24].x if hasattr(landmarks[24], 'x') else landmarks[24][0]
+    lm24_y = landmarks[24].y if hasattr(landmarks[24], 'y') else landmarks[24][1]
+
+    dx_w = (lm24_x - lm23_x) * img_w
+    dy_w = (lm24_y - lm23_y) * img_h
     waist_cm = np.hypot(dx_w, dy_w) * scale * 2.1
 
-    # Standard size classification: Chest <91=S, <97=M, <102=L, <107=XL, else XXL
     if chest_cm < 91:
         size_label = "S"
     elif chest_cm < 97:
@@ -167,9 +170,6 @@ def analyze_size(landmarks, img_h: int, img_w: int, user_height_cm: float, categ
     else:
         size_label = "XXL"
 
-    # Category specifics:
-    # For Kurti/Tops use same chest for Bust size
-    # For Saree return Blouse Size: 32, 34, 36, 38, 40
     cat_lower = category.lower()
     if cat_lower == "saree":
         chest_in = chest_cm / 2.54
@@ -197,6 +197,140 @@ def analyze_size(landmarks, img_h: int, img_w: int, user_height_cm: float, categ
         "waist_cm": waist_cm,
         "scale": scale
     }
+
+
+# -----------------------------------------------------------------------------
+# 4. Realistic Warping & Smoothing Layer
+# -----------------------------------------------------------------------------
+class LandmarkSmoother:
+    """Exponential Moving Average (EMA) smoothing filter to eliminate tracking jitter."""
+    def __init__(self, alpha: float = 0.3):
+        self.alpha = alpha  # 0.7 * prev + 0.3 * curr
+        self.prev_landmarks = None
+
+    def update(self, landmarks):
+        if not landmarks:
+            return None
+
+        curr_pts = []
+        for lm in landmarks:
+            x = lm.x if hasattr(lm, 'x') else lm[0]
+            y = lm.y if hasattr(lm, 'y') else lm[1]
+            z = lm.z if hasattr(lm, 'z') else (lm[2] if len(lm) > 2 else 0.0)
+            curr_pts.append((x, y, z))
+
+        if self.prev_landmarks is None or len(self.prev_landmarks) != len(curr_pts):
+            self.prev_landmarks = curr_pts
+            return self.prev_landmarks
+
+        smoothed = []
+        for (px, py, pz), (cx, cy, cz) in zip(self.prev_landmarks, curr_pts):
+            sx = 0.7 * px + 0.3 * cx
+            sy = 0.7 * py + 0.3 * cy
+            sz = 0.7 * pz + 0.3 * cz
+            smoothed.append((sx, sy, sz))
+
+        self.prev_landmarks = smoothed
+        return smoothed
+
+    def reset(self):
+        self.prev_landmarks = None
+
+
+def warp_garment_perspective(
+    frame: np.ndarray,
+    garment_rgba: np.ndarray,
+    landmarks: list,
+    garment: dict
+) -> np.ndarray:
+    """
+    Warps garment PNG to person using 4-point perspective transform, rotation angle,
+    and soft edge feathering.
+    """
+    img_h, img_w = frame.shape[:2]
+    g_h, g_w = garment_rgba.shape[:2]
+    g_type = garment.get("type", "upper").lower()
+
+    # Landmark coordinates in pixels
+    # 11: Right Shoulder, 12: Left Shoulder
+    pt11 = (landmarks[11][0] * img_w, landmarks[11][1] * img_h)
+    pt12 = (landmarks[12][0] * img_w, landmarks[12][1] * img_h)
+
+    # Order viewer-left to viewer-right
+    sh_left = pt11 if pt11[0] <= pt12[0] else pt12
+    sh_right = pt12 if pt11[0] <= pt12[0] else pt11
+
+    dx = sh_right[0] - sh_left[0]
+    dy = sh_right[1] - sh_left[1]
+    shoulder_dist = max(20.0, np.hypot(dx, dy))
+    angle_rad = np.arctan2(dy, dx)
+
+    # Garment width scaling ratio:
+    # width = shoulder_distance * 1.45 for Shirt/T-Shirt/Top
+    # width = shoulder_distance * 1.35 for Kurti/Saree
+    if g_type in ["long_upper", "kurti", "saree"]:
+        target_width = shoulder_dist * 1.35
+    else:
+        target_width = shoulder_dist * 1.45
+
+    # Determine lower anchor landmarks based on garment category
+    # upper = till Hip(24)
+    # long_upper/Kurti = till Knee(26)
+    # Saree = till Ankle(28)
+    if g_type == "upper":
+        b1 = (landmarks[23][0] * img_w, landmarks[23][1] * img_h)
+        b2 = (landmarks[24][0] * img_w, landmarks[24][1] * img_h)
+    elif g_type in ["long_upper", "kurti"]:
+        b1 = (landmarks[25][0] * img_w, landmarks[25][1] * img_h)
+        b2 = (landmarks[26][0] * img_w, landmarks[26][1] * img_h)
+    else:  # saree
+        b1 = (landmarks[27][0] * img_w, landmarks[27][1] * img_h)
+        b2 = (landmarks[28][0] * img_w, landmarks[28][1] * img_h)
+
+    bot_left = b1 if b1[0] <= b2[0] else b2
+    bot_right = b2 if b1[0] <= b2[0] else b1
+
+    # Midpoints
+    mid_top_x = (sh_left[0] + sh_right[0]) / 2.0
+    mid_top_y = (sh_left[1] + sh_right[1]) / 2.0 - shoulder_dist * 0.16  # collar sits slightly above shoulders
+
+    mid_bot_x = (bot_left[0] + bot_right[0]) / 2.0
+    mid_bot_y = (bot_left[1] + bot_right[1]) / 2.0
+
+    # Unit vector along shoulder tilt
+    ux = np.cos(angle_rad)
+    uy = np.sin(angle_rad)
+
+    # Destination 4 points (Perspective Quad)
+    dst_tl = [mid_top_x - (target_width / 2.0) * ux, mid_top_y - (target_width / 2.0) * uy]
+    dst_tr = [mid_top_x + (target_width / 2.0) * ux, mid_top_y + (target_width / 2.0) * uy]
+
+    bot_w = target_width * (1.10 if g_type != "upper" else 0.95)
+    dst_br = [mid_bot_x + (bot_w / 2.0) * ux, mid_bot_y + (bot_w / 2.0) * uy]
+    dst_bl = [mid_bot_x - (bot_w / 2.0) * ux, mid_bot_y - (bot_w / 2.0) * uy]
+
+    dst_pts = np.float32([dst_tl, dst_tr, dst_br, dst_bl])
+    src_pts = np.float32([[0, 0], [g_w, 0], [g_w, g_h], [0, g_h]])
+
+    # Perspective Warp Matrix
+    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+    warped_rgba = cv2.warpPerspective(
+        garment_rgba, M, (img_w, img_h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0, 0)
+    )
+
+    # 4. Soft Edge Feathering: Blur dress mask with GaussianBlur(7,7)
+    raw_alpha = warped_rgba[:, :, 3].astype(np.float32) / 255.0
+    feathered_alpha = cv2.GaussianBlur(raw_alpha, (7, 7), 0)
+    feathered_3ch = np.dstack([feathered_alpha] * 3)
+
+    warped_bgr = warped_rgba[:, :, :3]
+
+    # Alpha blend onto frame
+    blended_frame = (frame.astype(np.float32) * (1.0 - feathered_3ch) + warped_bgr.astype(np.float32) * feathered_3ch).astype(np.uint8)
+    return blended_frame
 
 
 def draw_hud(
@@ -259,7 +393,10 @@ def run_photo_mode(image_path: str, user_height_cm: float):
         return
 
     detector = PoseDetector()
-    landmarks = detector.detect(base_frame)
+    smoother = LandmarkSmoother(alpha=0.3)
+    raw_landmarks = detector.detect(base_frame)
+    smoothed_landmarks = smoother.update(raw_landmarks) if raw_landmarks else None
+
     current_index = 0
     show_size = True
     window_name = "AURA Virtual Trial Room [PHOTO MODE]"
@@ -267,11 +404,13 @@ def run_photo_mode(image_path: str, user_height_cm: float):
     while True:
         display_frame = base_frame.copy()
         garment = GARMENTS[current_index]
+        garment_rgba = load_garment_image(garment["file"])
 
         size_info = None
-        if landmarks:
+        if smoothed_landmarks:
             h, w = display_frame.shape[:2]
-            size_info = analyze_size(landmarks, h, w, user_height_cm, garment["category"])
+            size_info = analyze_size(smoothed_landmarks, h, w, user_height_cm, garment["category"])
+            display_frame = warp_garment_perspective(display_frame, garment_rgba, smoothed_landmarks, garment)
 
         draw_hud(display_frame, garment, current_index, len(GARMENTS), user_height_cm, mode="Photo Upload", size_info=size_info, show_size=show_size)
 
@@ -295,6 +434,7 @@ def run_photo_mode(image_path: str, user_height_cm: float):
 def run_camera_mode(user_height_cm: float):
     """Run Virtual Trial Room in real-time on live camera feed."""
     detector = PoseDetector()
+    smoother = LandmarkSmoother(alpha=0.3)
     current_index = 0
     show_size = True
     cap = cv2.VideoCapture(0)
@@ -330,11 +470,15 @@ def run_camera_mode(user_height_cm: float):
         frame = cv2.flip(frame, 1)
         h, w = frame.shape[:2]
         garment = GARMENTS[current_index]
+        garment_rgba = load_garment_image(garment["file"])
 
-        landmarks = detector.detect(frame)
+        raw_landmarks = detector.detect(frame)
+        smoothed_landmarks = smoother.update(raw_landmarks) if raw_landmarks else None
+
         size_info = None
-        if landmarks:
-            size_info = analyze_size(landmarks, h, w, user_height_cm, garment["category"])
+        if smoothed_landmarks:
+            size_info = analyze_size(smoothed_landmarks, h, w, user_height_cm, garment["category"])
+            frame = warp_garment_perspective(frame, garment_rgba, smoothed_landmarks, garment)
 
         draw_hud(frame, garment, current_index, len(GARMENTS), user_height_cm, mode="Live Camera", size_info=size_info, show_size=show_size)
 
