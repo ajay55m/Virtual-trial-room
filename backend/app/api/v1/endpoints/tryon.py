@@ -8,6 +8,7 @@ Implements asynchronous job submission and polling:
 import os
 import io
 import uuid
+import base64
 import asyncio
 import logging
 from datetime import datetime, timezone
@@ -15,6 +16,18 @@ from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks, status
 from pydantic import BaseModel, Field
+from PIL import Image, ImageOps
+
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+except Exception:
+    pass
+
+try:
+    import pymupdf
+except Exception:
+    pymupdf = None
 
 from app.config import settings
 from app.services.tryon_pipeline import tryon_pipeline
@@ -72,7 +85,8 @@ def _run_tryon_task(
     garment_bytes: bytes,
     category: str,
     description: Optional[str],
-    provider_name: Optional[str]
+    provider_name: Optional[str],
+    garment_id: Optional[str] = None
 ):
     """Executes try-on pipeline in background worker and updates job store."""
     job = TRYON_JOBS.get(job_id)
@@ -98,6 +112,7 @@ def _run_tryon_task(
             category=category,
             garment_description=description,
             provider_name=provider_name,
+            garment_id=garment_id,
             progress_callback=progress_callback
         )
 
@@ -214,7 +229,8 @@ async def submit_tryon(
         garment_bytes,
         category,
         resolved_desc,
-        provider
+        provider,
+        garment_id
     )
 
     return TryOnSubmitResponse(
@@ -252,3 +268,76 @@ async def get_tryon_job(job_id: str):
         metrics=job.get("metrics"),
         logs=job.get("logs", [])
     )
+
+
+@router.post("/convert-upload")
+async def convert_uploaded_file(file: UploadFile = File(...)):
+    """
+    Converts any uploaded file (iPhone HEIC/HEIF photos, Apple PDF documents, WEBP, PNG, JPEG)
+    into a web-compatible, high-resolution JPEG data URL.
+    """
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    filename = (file.filename or "").lower()
+    content_type = (file.content_type or "").lower()
+
+    # 1. PDF Document conversion (e.g. iPhone scanned document or PDF)
+    if filename.endswith(".pdf") or "pdf" in content_type:
+        if pymupdf:
+            try:
+                doc = pymupdf.open(stream=raw_bytes, filetype="pdf")
+                if len(doc) > 0:
+                    page = doc.load_page(0)
+                    pix = page.get_pixmap(dpi=150)
+                    jpeg_bytes = pix.tobytes("jpeg")
+                    b64 = base64.b64encode(jpeg_bytes).decode("ascii")
+                    return {
+                        "status": "success",
+                        "format": "jpeg",
+                        "width": pix.width,
+                        "height": pix.height,
+                        "dataUrl": f"data:image/jpeg;base64,{b64}"
+                    }
+            except Exception as e:
+                logger.error(f"PyMuPDF failed to process PDF document: {e}")
+
+    # 2. HEIC / HEIF / standard image processing via Pillow
+    try:
+        image = Image.open(io.BytesIO(raw_bytes))
+        # Handle RGBA / transparency or palette
+        if image.mode in ("RGBA", "LA", "P"):
+            background = Image.new("RGB", image.size, (255, 255, 255))
+            if image.mode == "P":
+                image = image.convert("RGBA")
+            background.paste(image, mask=image.split()[-1])
+            image = background
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
+
+        # Normalize EXIF orientation if present (crucial for iPhone camera orientations)
+        try:
+            image = ImageOps.exif_transpose(image)
+        except Exception:
+            pass
+
+        out_buffer = io.BytesIO()
+        image.save(out_buffer, format="JPEG", quality=92)
+        jpeg_bytes = out_buffer.getvalue()
+        b64 = base64.b64encode(jpeg_bytes).decode("ascii")
+
+        return {
+            "status": "success",
+            "format": "jpeg",
+            "width": image.width,
+            "height": image.height,
+            "dataUrl": f"data:image/jpeg;base64,{b64}"
+        }
+    except Exception as e:
+        logger.error(f"Failed to decode image/document '{filename}': {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unable to process file '{file.filename}'. Please ensure it is a valid photo or document."
+        )
+
