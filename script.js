@@ -1,4 +1,6 @@
-const API_URL = "http://localhost:8000";
+const API_URL = (typeof window !== "undefined" && window.location.port === "8000")
+  ? ""
+  : "http://localhost:8000";
 let uploadedFile = null;
 let selectedSaree = "saree1.jpg"; // Default first saree selected
 
@@ -79,3 +81,4 @@ document.getElementById("tryOnBtn").addEventListener("click", async () => {
     btn.disabled = false;
   }
 });
+

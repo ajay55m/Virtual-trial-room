@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 import os
 import uuid
 import shutil
@@ -13,6 +14,7 @@ from dotenv import load_dotenv
 
 # Load environment variables from backend/.env or root .env
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 load_dotenv(os.path.join(BASE_DIR, "../.env"))
 
@@ -38,6 +40,24 @@ os.makedirs(GARMENTS, exist_ok=True)
 # Mount static file routes so images can be served to browser
 app.mount("/results", StaticFiles(directory=RESULTS), name="results")
 app.mount("/garments", StaticFiles(directory=GARMENTS), name="garments")
+
+# Serve Web Frontend directly on port 8000
+@app.get("/")
+def serve_index():
+    index_path = os.path.join(ROOT_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    return {"status": "ok", "service": "Virtual Trial Room AI Backend"}
+
+@app.get("/style.css")
+def serve_css():
+    css_path = os.path.join(ROOT_DIR, "style.css")
+    return FileResponse(css_path, media_type="text/css")
+
+@app.get("/script.js")
+def serve_js():
+    js_path = os.path.join(ROOT_DIR, "script.js")
+    return FileResponse(js_path, media_type="application/javascript")
 
 jobs: dict = {}
 
