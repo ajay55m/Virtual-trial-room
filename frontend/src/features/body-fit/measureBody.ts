@@ -75,3 +75,4 @@ export async function measureBodyFromPhoto(
     size: chest < 88 ? "S" : chest < 98 ? "M" : chest < 108 ? "L" : "XL",
   };
 }
+

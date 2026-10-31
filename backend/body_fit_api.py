@@ -145,3 +145,4 @@ def get_job(job_id: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("body_fit_api:app", host="0.0.0.0", port=8000, reload=True)
+
