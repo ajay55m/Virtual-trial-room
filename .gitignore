@@ -29,10 +29,8 @@ env/
 # Ephemeral Session Captures
 frontend/public/assets/captures/
 public/assets/captures/
-uploads/*
-!uploads/.gitkeep
-results/*
-!results/.gitkeep
+uploads/
+results/
 
 # IDEs & System
 .vscode/*

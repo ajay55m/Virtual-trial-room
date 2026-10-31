@@ -17,6 +17,3 @@ pillow>=10.0.0
 websockets>=13.0
 fal-client>=1.0.0
 gradio-client>=2.7.0
-replicate>=0.25.0
-requests>=2.31.0
-python-dotenv>=1.0.0
