@@ -30,6 +30,7 @@ import { kioskAudio } from '../utils/audio';
 import { apiService, type GarmentTuningOptions } from '../services/api';
 import { StyleAssistant } from './StyleAssistant';
 import { isValidUploadFile, processFileToDataUrl } from '../utils/fileUploadHelper';
+import { useBodyTryOn } from '../features/body-fit/useBodyTryOn';
 
 interface ResultViewProps {
   sessionId?: string;
@@ -71,6 +72,9 @@ export const ResultView: React.FC<ResultViewProps> = ({
   });
   const [activeGarmentIndex, setActiveGarmentIndex] = useState<number>(0);
   const activeGarment = garmentsList[activeGarmentIndex] || garment;
+
+  // Body-Fit AI Try-On Hook
+  const { handleUpload: handleBodyUpload, trySareeOnMyBody, resultImage: bodyFitResultImage, measurements: bodyMeasurements, loading: bodyFitLoading } = useBodyTryOn();
 
   // View presentation mode: 'outfit' (fitted on her), 'fabric' (macro closeup), 'split' (interactive curtain), 'heatmap'
   const [viewMode, setViewMode] = useState<'outfit' | 'fabric' | 'split' | 'heatmap'>('outfit');
@@ -258,13 +262,6 @@ export const ResultView: React.FC<ResultViewProps> = ({
     e.target.value = '';
   };
 
-  const openPhotoPicker = () => {
-    if (photoInputRef.current) {
-      photoInputRef.current.value = '';
-      photoInputRef.current.click();
-    }
-  };
-
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -357,8 +354,16 @@ export const ResultView: React.FC<ResultViewProps> = ({
     }
   };
 
-  // Measurements computation
-  const measurements: BodyMeasurements = userMeasurements || {
+  // Measurements computation (Prioritizes real scan from body-fit engine)
+  const measurements: BodyMeasurements = bodyMeasurements ? {
+    heightCm: bodyMeasurements.height,
+    shoulderCm: bodyMeasurements.shoulder,
+    chestCm: bodyMeasurements.chest,
+    waistCm: bodyMeasurements.waist,
+    hipCm: bodyMeasurements.hip,
+    lengthCm: userMeasurements?.lengthCm || Math.round(71.0 * (userHeightCm / 175.0) * 10) / 10,
+    sleeveCm: bodyMeasurements.sleeveArc || userMeasurements?.sleeveCm || Math.round(62.0 * (userHeightCm / 175.0) * 10) / 10,
+  } : userMeasurements || {
     heightCm: userHeightCm,
     shoulderCm: Math.round(44.0 * (userHeightCm / 175.0) * 10) / 10,
     chestCm: Math.round(94.0 * (userHeightCm / 175.0) * 10) / 10,
@@ -487,7 +492,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
             {/* Mode: Final Outfit View (Person wearing dress perfectly) */}
             {viewMode === 'outfit' && (
               <img
-                src={activeDisplayUri}
+                src={bodyFitResultImage || activeDisplayUri}
                 alt="Worn Look"
                 className={`w-full h-full object-contain transition-all duration-300 filter drop-shadow-xl ${ambienceFilterClass}`}
               />
@@ -512,7 +517,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
               <>
                 {/* Underneath: Final Outfit View */}
                 <img
-                  src={activeDisplayUri}
+                  src={bodyFitResultImage || activeDisplayUri}
                   alt="Final Outfit View"
                   className={`w-full h-full object-contain filter drop-shadow-xl ${ambienceFilterClass}`}
                 />
@@ -551,7 +556,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
             {viewMode === 'heatmap' && (
               <>
                 <img
-                  src={activeDisplayUri}
+                  src={bodyFitResultImage || activeDisplayUri}
                   alt="Fit Heatmap Base"
                   className="w-full h-full object-contain filter drop-shadow-xl brightness-90"
                 />
@@ -671,13 +676,34 @@ export const ResultView: React.FC<ResultViewProps> = ({
                 <span>Fit Heatmap</span>
               </button>
 
-              <button
-                onClick={openPhotoPicker}
-                className="px-3 py-1.5 rounded-full text-[11px] font-bold transition-all flex items-center gap-1.5 text-indigo-700 bg-indigo-50/80 hover:bg-white border border-indigo-200/60 shadow-xs"
+              <label
+                className="px-3 py-1.5 rounded-full text-[11px] font-bold transition-all flex items-center gap-1.5 text-indigo-700 bg-indigo-50/80 hover:bg-white border border-indigo-200/60 shadow-xs cursor-pointer"
                 title="Upload a new person image to wear this outfit"
               >
                 <Upload className="w-3.5 h-3.5 text-indigo-600" />
                 <span>Upload Photo</span>
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      processPersonPhoto(file);
+                      handleBodyUpload(file);
+                    }
+                  }}
+                />
+              </label>
+
+              <button
+                onClick={() => trySareeOnMyBody(activeGarment.id, activeGarment.fabricCloseupImage || activeGarment.flatlayImage || activeGarment.tryonResultImage, currentPersonPhoto)}
+                disabled={bodyFitLoading}
+                className="px-3 py-1.5 rounded-full text-[11px] font-bold transition-all flex items-center gap-1.5 text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs active:scale-95 disabled:opacity-60 cursor-pointer"
+                title="Drape this saree on your body structure using AI"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>{bodyFitLoading ? 'Draping On Body...' : 'Wear On My Body'}</span>
               </button>
             </div>
 

@@ -31,6 +31,10 @@ frontend/public/assets/captures/
 public/assets/captures/
 uploads/
 results/
+backend/uploads/
+backend/results/
+backend/garments_cache/
+garments_cache/
 
 # IDEs & System
 .vscode/*
