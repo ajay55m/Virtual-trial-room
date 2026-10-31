@@ -13,7 +13,6 @@ import {
   Bot, 
   Sun, 
   Moon, 
-  ZoomIn, 
   Activity,
   SlidersHorizontal,
   Upload,
@@ -73,8 +72,15 @@ export const ResultView: React.FC<ResultViewProps> = ({
   const [activeGarmentIndex, setActiveGarmentIndex] = useState<number>(0);
   const activeGarment = garmentsList[activeGarmentIndex] || garment;
 
-  // Body-Fit AI Try-On Hook
-  const { handleUpload: handleBodyUpload, trySareeOnMyBody, resultImage: bodyFitResultImage, measurements: bodyMeasurements, loading: bodyFitLoading } = useBodyTryOn();
+  // Body-Fit AI Try-On Hook (Flexible for any girl)
+  const { 
+    handleUpload: handleBodyUpload, 
+    wearOnMyBody, 
+    bodyFitResult, 
+    personPreview, 
+    isGenerating: bodyFitLoading,
+    bodyProfile
+  } = useBodyTryOn();
 
   // View presentation mode: 'outfit' (fitted on her), 'fabric' (macro closeup), 'split' (interactive curtain), 'heatmap'
   const [viewMode, setViewMode] = useState<'outfit' | 'fabric' | 'split' | 'heatmap'>('outfit');
@@ -87,10 +93,6 @@ export const ResultView: React.FC<ResultViewProps> = ({
   
   // Interactive Split Slider State (0 to 100%)
   const [splitPos, setSplitPos] = useState<number>(50);
-
-  // 4K Fabric Zoom Loupe State
-  const [showLoupe, setShowLoupe] = useState<boolean>(false);
-  const [loupePos, setLoupePos] = useState<{ x: number; y: number; px: number; py: number }>({ x: 0, y: 0, px: 50, py: 50 });
 
   // Luxury Ambience / Boutique Lighting Mode
   const [ambience, setAmbience] = useState<'studio' | 'warm' | 'evening'>('studio');
@@ -338,32 +340,20 @@ export const ResultView: React.FC<ResultViewProps> = ({
   const handleSplitMouseMove = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
 
     const posX = Math.max(0, Math.min(rect.width, clientX - rect.left));
-    const posY = Math.max(0, Math.min(rect.height, clientY - rect.top));
     const percentX = Math.round((posX / rect.width) * 100);
-    const percentY = Math.round((posY / rect.height) * 100);
 
     if (viewMode === 'split') {
       setSplitPos(percentX);
     }
-
-    if (showLoupe) {
-      setLoupePos({ x: posX, y: posY, px: percentX, py: percentY });
-    }
   };
 
-  // Measurements computation (Prioritizes real scan from body-fit engine)
-  const measurements: BodyMeasurements = bodyMeasurements ? {
-    heightCm: bodyMeasurements.height,
-    shoulderCm: bodyMeasurements.shoulder,
-    chestCm: bodyMeasurements.chest,
-    waistCm: bodyMeasurements.waist,
-    hipCm: bodyMeasurements.hip,
-    lengthCm: userMeasurements?.lengthCm || Math.round(71.0 * (userHeightCm / 175.0) * 10) / 10,
-    sleeveCm: bodyMeasurements.sleeveArc || userMeasurements?.sleeveCm || Math.round(62.0 * (userHeightCm / 175.0) * 10) / 10,
-  } : userMeasurements || {
+  // Priority: 1. AI Body-fit Result on HER > 2. Her new preview > 3. Her uploaded photo > 4. Garment fallback
+  const displayResultUri = bodyFitResult || personPreview || currentPersonPhoto || activeDisplayUri;
+
+  // Measurements computation (Prioritizes real scan from flexible body-fit engine)
+  const measurements: BodyMeasurements = userMeasurements ? { ...userMeasurements } : {
     heightCm: userHeightCm,
     shoulderCm: Math.round(44.0 * (userHeightCm / 175.0) * 10) / 10,
     chestCm: Math.round(94.0 * (userHeightCm / 175.0) * 10) / 10,
@@ -372,6 +362,12 @@ export const ResultView: React.FC<ResultViewProps> = ({
     lengthCm: Math.round(71.0 * (userHeightCm / 175.0) * 10) / 10,
     sleeveCm: Math.round(62.0 * (userHeightCm / 175.0) * 10) / 10,
   };
+
+  // Adapt to her flexible skeletal ratios (works for Hourglass, Pear, Apple, Rectangle, etc.)
+  if (bodyProfile) {
+    measurements.waistCm = Math.round(measurements.hipCm * bodyProfile.waistHipRatio);
+    measurements.shoulderCm = Math.round(measurements.hipCm * bodyProfile.shoulderHipRatio);
+  }
 
   const handleSendEmail = (e: React.FormEvent) => {
     e.preventDefault();
@@ -492,7 +488,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
             {/* Mode: Final Outfit View (Person wearing dress perfectly) */}
             {viewMode === 'outfit' && (
               <img
-                src={bodyFitResultImage || activeDisplayUri}
+                src={displayResultUri}
                 alt="Worn Look"
                 className={`w-full h-full object-contain transition-all duration-300 filter drop-shadow-xl ${ambienceFilterClass}`}
               />
@@ -517,7 +513,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
               <>
                 {/* Underneath: Final Outfit View */}
                 <img
-                  src={bodyFitResultImage || activeDisplayUri}
+                  src={displayResultUri}
                   alt="Final Outfit View"
                   className={`w-full h-full object-contain filter drop-shadow-xl ${ambienceFilterClass}`}
                 />
@@ -556,7 +552,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
             {viewMode === 'heatmap' && (
               <>
                 <img
-                  src={bodyFitResultImage || activeDisplayUri}
+                  src={displayResultUri}
                   alt="Fit Heatmap Base"
                   className="w-full h-full object-contain filter drop-shadow-xl brightness-90"
                 />
@@ -589,29 +585,6 @@ export const ResultView: React.FC<ResultViewProps> = ({
                   </div>
                 </div>
               </>
-            )}
-
-            {/* 4K Fabric Zoom Loupe */}
-            {showLoupe && (
-              <div 
-                className="absolute w-44 h-44 rounded-full border-4 border-amber-400 shadow-2xl overflow-hidden pointer-events-none z-30 ring-4 ring-indigo-500/30"
-                style={{ 
-                  left: `${loupePos.x - 88}px`, 
-                  top: `${loupePos.y - 88}px`,
-                  backgroundImage: `url(${viewMode === 'fabric' ? fabricCloseupUri : activeDisplayUri})`,
-                  backgroundSize: '350%',
-                  backgroundPosition: `${loupePos.px}% ${loupePos.py}%`
-                }}
-              >
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-2.5 h-2.5 border border-white/80 rounded-full" />
-                </div>
-                <div className="absolute bottom-1 inset-x-0 text-center">
-                  <span className="text-[9px] font-bold px-2 py-0.5 bg-black/80 text-amber-300 rounded-full">
-                    4K Weave (3.5x)
-                  </span>
-                </div>
-              </div>
             )}
 
             {/* Top Toolbar: [Fabric View] <-> [Final Outfit View] Slider Toggle */}
@@ -697,7 +670,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
               </label>
 
               <button
-                onClick={() => trySareeOnMyBody(activeGarment.id, activeGarment.fabricCloseupImage || activeGarment.flatlayImage || activeGarment.tryonResultImage, currentPersonPhoto)}
+                onClick={() => wearOnMyBody(activeGarment, bodyProfile, currentPersonPhoto)}
                 disabled={bodyFitLoading}
                 className="px-3 py-1.5 rounded-full text-[11px] font-bold transition-all flex items-center gap-1.5 text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs active:scale-95 disabled:opacity-60 cursor-pointer"
                 title="Drape this saree on your body structure using AI"
@@ -721,20 +694,6 @@ export const ResultView: React.FC<ResultViewProps> = ({
               </button>
 
               <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => {
-                    kioskAudio.playBeep(600, 0.04);
-                    setShowLoupe(!showLoupe);
-                  }}
-                  className={`spatial-pill px-3 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1.5 border border-white/80 shadow-md transition-all ${
-                    showLoupe ? 'spatial-pill-active text-slate-950 ring-2 ring-amber-500/40' : 'text-slate-800 hover:bg-white'
-                  }`}
-                  title="4K Fabric Magnifier"
-                >
-                  <ZoomIn className="w-3.5 h-3.5 text-amber-600" />
-                  <span>{showLoupe ? 'Loupe On' : '4K Loupe'}</span>
-                </button>
-
                 <button
                   onClick={() => setShowFitTuner(!showFitTuner)}
                   className={`spatial-pill px-3 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1.5 border border-white/80 shadow-md transition-all ${

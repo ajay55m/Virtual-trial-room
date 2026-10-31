@@ -1,95 +1,69 @@
-import { useState } from 'react';
-import { measureBodyFromPhoto, type BodyMeasurements } from './measureBody';
+import { useState, useRef } from 'react';
+import { type FlexibleBodyProfile, analyzeAnyBody } from './bodyProfile';
 
 const API = "http://localhost:8000";
 
 export function useBodyTryOn() {
   const [personFile, setPersonFile] = useState<File | null>(null);
   const [personPreview, setPersonPreview] = useState<string>("");
-  const [resultImage, setResultImage] = useState<string>("");
-  const [measurements, setMeasurements] = useState<BodyMeasurements | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [bodyFitResult, setBodyFitResult] = useState<string>("");
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [bodyProfile, setBodyProfile] = useState<FlexibleBodyProfile | null>(null);
+  const fileRef = useRef<File | null>(null);
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = (file: File) => {
+    fileRef.current = file; // Ref prevents stale state bug
     setPersonFile(file);
     const url = URL.createObjectURL(file);
     setPersonPreview(url);
-    try {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.src = url;
-      await img.decode();
-      const m = await measureBodyFromPhoto(img, 175);
-      setMeasurements(m);
-      return m;
-    } catch (e) {
-      console.warn("Measurement detection fallback:", e);
-      const fallbackM: BodyMeasurements = {
-        shoulder: 44,
-        chest: 94,
-        waist: 78,
-        hip: 96,
-        height: 175,
-        sleeveArc: 62,
-        size: "M",
-      };
-      setMeasurements(fallbackM);
-      return fallbackM;
-    }
+    setBodyFitResult(""); // Clear old model result on new upload
+
+    // Auto-analyze body profile from uploaded photo
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = url;
+    img.onload = () => {
+      const detected = analyzeAnyBody([], img.width, img.height);
+      setBodyProfile(detected);
+    };
   };
 
-  const trySareeOnMyBody = async (garmentId: string, garmentImageUrl: string, fallbackPhotoUri?: string) => {
-    let fileToUse = personFile;
-    let measToUse = measurements;
-
-    if (!fileToUse && fallbackPhotoUri) {
+  const wearOnMyBody = async (saree: any, profile?: any, fallbackPhotoUri?: string) => {
+    // If user hasn't explicitly uploaded a new file in result view, convert fallbackPhotoUri from Step 2
+    if (!fileRef.current && fallbackPhotoUri) {
       try {
         const resp = await fetch(fallbackPhotoUri);
         const blob = await resp.blob();
-        fileToUse = new File([blob], "person.jpg", { type: blob.type || "image/jpeg" });
-        setPersonFile(fileToUse);
-        if (!measToUse) {
-          const img = new Image();
-          img.crossOrigin = "anonymous";
-          img.src = fallbackPhotoUri;
-          await img.decode();
-          measToUse = await measureBodyFromPhoto(img, 175);
-          setMeasurements(measToUse);
-        }
-      } catch (err) {
-        console.warn("Fallback photo conversion:", err);
+        const f = new File([blob], "person.jpg", { type: blob.type || "image/jpeg" });
+        fileRef.current = f;
+        setPersonFile(f);
+        setPersonPreview(fallbackPhotoUri);
+      } catch (e) {
+        console.warn("Could not convert fallback photo uri:", e);
       }
     }
 
-    if (!fileToUse) {
-      return alert("Upload your full-body photo first");
+    if (!fileRef.current) return alert("Upload your photo first!");
+
+    const activeProfile = profile || bodyProfile || analyzeAnyBody([], 1000, 1000);
+    if (activeProfile.confidence < 0.5) {
+      return alert("Photo unclear. Upload front-facing, full-body photo in good light.");
     }
 
-    if (!measToUse) {
-      measToUse = {
-        shoulder: 44,
-        chest: 94,
-        waist: 78,
-        hip: 96,
-        height: 175,
-        sleeveArc: 62,
-        size: "M",
-      };
-      setMeasurements(measToUse);
-    }
-
-    setLoading(true);
+    setIsGenerating(true);
     try {
       const form = new FormData();
-      form.append("person_image", fileToUse);
-      form.append("garment_id", garmentId);
-      form.append("garment_url", garmentImageUrl);
-      form.append("measurements", JSON.stringify(measToUse)); // <-- Body structure sent
+      form.append("person_image", fileRef.current); // HER photo, not stock model
+      form.append("garment_id", saree?.id || "garment_active");
+      form.append(
+        "garment_image_url",
+        saree?.image || saree?.fabricCloseupImage || saree?.flatlayImage || saree?.tryonResultImage || ""
+      );
+      form.append("garment_name", saree?.name || "Traditional Saree");
+      form.append("body_profile", JSON.stringify(activeProfile));
 
       const res = await fetch(`${API}/api/body-fit/tryon`, { method: "POST", body: form });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { job_id } = await res.json();
 
       const poll = setInterval(async () => {
@@ -99,23 +73,35 @@ export function useBodyTryOn() {
           const job = await jobRes.json();
           if (job.status === "completed") {
             clearInterval(poll);
-            setResultImage(API + job.result_url);
-            setLoading(false);
+            setBodyFitResult(API + job.result_url);
+            setIsGenerating(false);
           } else if (job.status === "failed") {
             clearInterval(poll);
-            alert(job.error || "Body-fit drape failed");
-            setLoading(false);
+            alert(job.error || "Try-on failed");
+            setIsGenerating(false);
           }
         } catch {
           // continue polling
         }
       }, 3000);
     } catch (err) {
-      setLoading(false);
+      setIsGenerating(false);
       console.warn("Body try-on API call error:", err);
       alert("Start backend: uvicorn body_fit_api:app --port 8000");
     }
   };
 
-  return { handleUpload, trySareeOnMyBody, personPreview, resultImage, measurements, loading };
+  return {
+    handleUpload,
+    wearOnMyBody,
+    trySareeOnMyBody: wearOnMyBody, // backwards compatibility alias
+    personFile,
+    personPreview,
+    bodyFitResult,
+    resultImage: bodyFitResult, // backwards compatibility alias
+    isGenerating,
+    loading: isGenerating, // backwards compatibility alias
+    bodyProfile,
+    setBodyProfile,
+  };
 }
