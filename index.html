@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Virtual Trial Room - AI Saree Draping</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-group">
+        <div class="logo-icon">✨</div>
+        <div>
+          <h1>Virtual Trial Room</h1>
+          <p class="tagline">Spatial AI Saree Try-On & Biometric Fitting</p>
+        </div>
+      </div>
+      <div class="badge">AI-Powered IDM-VTON</div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="main-layout">
+      <!-- Left Column: Upload & Live Preview -->
+      <section class="card upload-card">
+        <div class="card-header">
+          <span class="step-num">1</span>
+          <h2>Upload Your Photo</h2>
+        </div>
+        <p class="section-desc">Upload a front-facing photo standing straight with full body or torso visible.</p>
+
+        <div class="upload-dropzone">
+          <input type="file" id="uploadInput" accept="image/*,.heic,.heif,.pdf">
+          <label for="uploadInput" class="upload-label">
+            <svg class="upload-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            <span class="upload-main-text">Click to browse or drop your photo</span>
+            <span class="upload-sub-text">Supports JPG, PNG, WEBP & iPhone photos</span>
+          </label>
+        </div>
+
+        <div class="preview-box">
+          <img id="previewImage" alt="User Photo Preview" style="display: none;">
+          <div class="preview-placeholder" id="previewPlaceholder">
+            <span>Uploaded photo will appear here</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Center Column: Saree Catalog Selection -->
+      <section class="card saree-card">
+        <div class="card-header">
+          <span class="step-num">2</span>
+          <h2>Select Saree to Try On</h2>
+        </div>
+        <p class="section-desc">Click any traditional draped saree from the catalog below.</p>
+
+        <div class="saree-grid">
+          <!-- Saree 1 -->
+          <div class="saree-item selected" data-id="saree1.jpg">
+            <div class="saree-thumb-wrapper">
+              <img src="garments/saree1.jpg" alt="Crimson & Gold Kanjeevaram Saree">
+              <div class="check-mark">✓</div>
+            </div>
+            <div class="saree-info">
+              <h3>Crimson & Gold Kanjeevaram</h3>
+              <p class="fabric">Pure Mulberry Silk &bull; 24K Gold Zari</p>
+              <p class="price">$1,650</p>
+            </div>
+          </div>
+
+          <!-- Saree 2 -->
+          <div class="saree-item" data-id="saree2.jpg">
+            <div class="saree-thumb-wrapper">
+              <img src="garments/saree2.jpg" alt="Sapphire Kadwa Banarasi Brocade Saree">
+              <div class="check-mark">✓</div>
+            </div>
+            <div class="saree-info">
+              <h3>Sapphire Kadwa Banarasi</h3>
+              <p class="fabric">Katan Silk &bull; Silver Floral Jaal</p>
+              <p class="price">$1,380</p>
+            </div>
+          </div>
+
+          <!-- Saree 3 -->
+          <div class="saree-item" data-id="saree3.jpg">
+            <div class="saree-thumb-wrapper">
+              <img src="garments/saree3.jpg" alt="Emerald Brocade Silk Saree">
+              <div class="check-mark">✓</div>
+            </div>
+            <div class="saree-info">
+              <h3>Emerald Brocade Silk</h3>
+              <p class="fabric">Pure Brocade Silk &bull; Peacock Border</p>
+              <p class="price">$1,520</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Button & Status -->
+        <div class="action-section">
+          <button id="tryOnBtn" class="primary-btn">
+            <span>✨ Try On Saree with AI</span>
+          </button>
+          <div id="statusText" class="status-message">Select a photo and click Try On</div>
+        </div>
+      </section>
+
+      <!-- Right Column: Final AI Try-On Result -->
+      <section class="card result-card">
+        <div class="card-header">
+          <span class="step-num">3</span>
+          <h2>Your Try-On Result</h2>
+        </div>
+        <p class="section-desc">Your real photo realistically draped in the selected saree by AI.</p>
+
+        <div class="result-box">
+          <img id="resultImage" alt="AI Try-On Result" style="display: none;">
+          <div class="result-placeholder" id="resultPlaceholder">
+            <div class="sparkle-anim">✨</div>
+            <span>Your AI-fitted photo will appear here</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
