@@ -158,19 +158,31 @@ export const TailorTapeMeasuringScreen: React.FC<TailorTapeMeasuringScreenProps>
           );
 
           if (vtonResp?.job_id) {
-            // Quick check job status
             try {
-              const status = await apiService.pollTryonJob(vtonResp.job_id);
-              if (status?.result_url) {
-                generatedResults[garment.id] = status.result_url;
-              } else {
-                generatedResults[garment.id] = garment.virtualModelImage || garment.tryonResultImage || photoUri;
+              let attempts = 0;
+              let finalUrl: string | null = null;
+              while (attempts < 12 && isMountedRef.current) {
+                await new Promise((r) => setTimeout(r, 500));
+                attempts++;
+                const status = await apiService.pollTryonJob(vtonResp.job_id);
+                if (status?.status === 'COMPLETED' && status?.result_url) {
+                  finalUrl = status.result_url;
+                  break;
+                } else if (status?.status === 'FAILED') {
+                  break;
+                }
               }
-            } catch {
-              generatedResults[garment.id] = garment.virtualModelImage || garment.tryonResultImage || photoUri;
+              if (finalUrl) {
+                generatedResults[garment.id] = finalUrl;
+              } else {
+                generatedResults[garment.id] = photoUri;
+              }
+            } catch (pollErr) {
+              console.warn(`[FeedGen] Poll error for ${garment.name}:`, pollErr);
+              generatedResults[garment.id] = photoUri;
             }
           } else {
-            generatedResults[garment.id] = garment.virtualModelImage || garment.tryonResultImage || photoUri;
+            generatedResults[garment.id] = photoUri;
           }
         } catch (e) {
           console.warn(`[FeedGen] Fallback for ${garment.name}:`, e);

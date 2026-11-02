@@ -494,6 +494,63 @@ class FashnProvider(TryOnProvider):
 
 
 # -------------------------------------------------------------------------
+# Concrete Provider: Local Photometric Body-Fit Engine (Real-Time Fallback)
+# -------------------------------------------------------------------------
+
+class LocalPhotometricProvider(TryOnProvider):
+    """
+    High-speed, zero-cloud local Photometric Body-Fit Synthesizer.
+    Directly fits and drapes the garment onto the shopper's photo using
+    anatomical landmarks, SAM segmentation, and garment neckline/shoulder anchors.
+    """
+    @property
+    def name(self) -> str:
+        return "Local Photometric Body-Fit Engine"
+
+    def try_on(
+        self,
+        person_image_bytes: bytes,
+        garment_image_bytes: bytes,
+        category: str = "upper_body",
+        garment_description: Optional[str] = None
+    ) -> TryOnResult:
+        import time, uuid
+        from PIL import Image
+        start_time = time.time()
+        from app.services.tryon_synthesizer import tryon_synthesizer
+        user_img = Image.open(io.BytesIO(person_image_bytes)).convert("RGB")
+        temp_garment_path = os.path.join(tryon_synthesizer.captures_dir, f"temp_garm_{uuid.uuid4().hex[:8]}.png")
+        with open(temp_garment_path, "wb") as f:
+            f.write(garment_image_bytes)
+
+        gid = "garm_saree_01" if category == "dresses" else "garm_vf_sweater"
+        try:
+            res_url = tryon_synthesizer._drape_garment_onto_person(
+                session_id=f"local_{uuid.uuid4().hex[:8]}",
+                garment_id=gid,
+                user_img=user_img,
+                garment_path=temp_garment_path
+            )
+            out_filename = os.path.basename(res_url)
+            out_path = os.path.join(tryon_synthesizer.captures_dir, out_filename)
+            with open(out_path, "rb") as of:
+                out_bytes = of.read()
+        finally:
+            if os.path.exists(temp_garment_path):
+                try:
+                    os.remove(temp_garment_path)
+                except Exception:
+                    pass
+
+        return TryOnResult(
+            image_bytes=out_bytes,
+            provider_name=self.name,
+            latency_seconds=time.time() - start_time,
+            metadata={"local": True}
+        )
+
+
+# -------------------------------------------------------------------------
 # Factory / Registry
 # -------------------------------------------------------------------------
 
@@ -501,14 +558,16 @@ def get_tryon_provider(provider_type: Optional[str] = None) -> TryOnProvider:
     """
     Factory function returning the configured active TryOnProvider.
     """
-    choice = (provider_type or settings.TRYON_PROVIDER or "huggingface").lower().strip()
+    choice = (provider_type or settings.TRYON_PROVIDER or "local").lower().strip()
 
-    if choice in ["huggingface", "hf", "idm-vton", "idm_vton"]:
+    if choice in ["local", "photometric", "body-fit", "offline"]:
+        return LocalPhotometricProvider()
+    elif choice in ["huggingface", "hf", "idm-vton", "idm_vton"]:
         return HuggingFaceIDMVTONProvider()
     elif choice in ["fal", "catvton", "cat-vton"]:
         return FalCatVTONProvider()
     elif choice in ["fashn", "fashn-ai", "fashn.ai"]:
         return FashnProvider()
     else:
-        logger.warning(f"Unknown try-on provider '{choice}', defaulting to HuggingFace IDM-VTON.")
-        return HuggingFaceIDMVTONProvider()
+        logger.warning(f"Unknown try-on provider '{choice}', using Local Photometric Body-Fit Engine.")
+        return LocalPhotometricProvider()

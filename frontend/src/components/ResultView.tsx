@@ -77,7 +77,6 @@ export const ResultView: React.FC<ResultViewProps> = ({
     handleUpload: handleBodyUpload, 
     wearOnMyBody, 
     bodyFitResult, 
-    personPreview, 
     isGenerating: bodyFitLoading,
     bodyProfile
   } = useBodyTryOn();
@@ -141,21 +140,11 @@ export const ResultView: React.FC<ResultViewProps> = ({
   const [curatedOccasion, setCuratedOccasion] = useState<string>('Wedding / Reception');
   const [curatedCategory, setCuratedCategory] = useState<string>('All');
 
-  // When active garment changes, update display URI and drape calibration
-  useEffect(() => {
-    const uri = tryonResultsMap[activeGarment.id] || activeGarment.virtualModelImage || activeGarment.tryonResultImage || currentPersonPhoto;
-    setActiveDisplayUri(uri);
-
-    const saved = localStorage.getItem(`drape_calibration_${activeGarment.id}`);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setDrapeTuning(parsed);
-      } catch (e) {
-        console.warn('Failed to parse saved calibration:', e);
-      }
-    }
-  }, [activeGarmentIndex, garmentsList]);
+  // Helper to check if a URI is a real draped capture/result (not a stock model or raw un-draped photo)
+  const isDrapedImage = (url?: string | null): boolean => {
+    if (!url) return false;
+    return url.includes('/assets/captures/') || url.includes('/results/') || url.startsWith('http://localhost:8000/results/') || url.startsWith('blob:');
+  };
 
   /**
    * Mode B: Photoreal Virtual Try-On Pipeline (Task 6)
@@ -167,7 +156,7 @@ export const ResultView: React.FC<ResultViewProps> = ({
   ) => {
     if (!activeGarment) return;
     setIsGeneratingAI(true);
-    setAiProgressMessage(`Synthesizing Photoreal Look for ${activeGarment.name}...`);
+    setAiProgressMessage(`Draping ${activeGarment.name} onto your body structure...`);
     try {
       let personBlob: Blob;
       if (photoUri.startsWith('data:')) {
@@ -197,10 +186,10 @@ export const ResultView: React.FC<ResultViewProps> = ({
         );
 
         if (submitRes && submitRes.job_id) {
-          setAiProgressMessage('Rendering realistic fabric drape with IDM-VTON...');
+          setAiProgressMessage('Refining pleats and pallu alignment...');
           const startPoll = Date.now();
-          while (Date.now() - startPoll < 35000) {
-            await new Promise((r) => setTimeout(r, 1500));
+          while (Date.now() - startPoll < 25000) {
+            await new Promise((r) => setTimeout(r, 600));
             const statusRes = await apiService.pollTryonJob(submitRes.job_id);
             if (statusRes.status === 'COMPLETED' && statusRes.result_url) {
               setActiveDisplayUri(statusRes.result_url);
@@ -233,6 +222,29 @@ export const ResultView: React.FC<ResultViewProps> = ({
       setAiProgressMessage('');
     }
   };
+
+  // When active garment changes, update display URI and drape calibration
+  useEffect(() => {
+    const existing = tryonResultsMap[activeGarment?.id];
+    if (existing && isDrapedImage(existing) && existing !== defaultModelUri && existing !== currentPersonPhoto) {
+      setActiveDisplayUri(existing);
+    } else if (currentPersonPhoto) {
+      // Automatically trigger tryon drape onto her body
+      generatePhotorealTryon(currentPersonPhoto, currentSize, tuningOptions);
+    } else {
+      setActiveDisplayUri(defaultModelUri);
+    }
+
+    const saved = localStorage.getItem(`drape_calibration_${activeGarment.id}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setDrapeTuning(parsed);
+      } catch (e) {
+        console.warn('Failed to parse saved calibration:', e);
+      }
+    }
+  }, [activeGarmentIndex, garmentsList]);
 
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
@@ -349,8 +361,16 @@ export const ResultView: React.FC<ResultViewProps> = ({
     }
   };
 
-  // Priority: 1. AI Body-fit Result on HER > 2. Her new preview > 3. Her uploaded photo > 4. Garment fallback
-  const displayResultUri = bodyFitResult || personPreview || currentPersonPhoto || activeDisplayUri;
+  // Priority: 1. AI Body-fit Result on HER > 2. Draped Tryon Result on HER > 3. Customer photo (while generating) > 4. Studio model
+  const isRealDrape = isDrapedImage(activeDisplayUri) && activeDisplayUri !== defaultModelUri && activeDisplayUri !== currentPersonPhoto;
+  const isRealMapDrape = isDrapedImage(tryonResultsMap[activeGarment?.id]) && tryonResultsMap[activeGarment.id] !== defaultModelUri && tryonResultsMap[activeGarment.id] !== currentPersonPhoto;
+
+  const displayResultUri =
+    bodyFitResult ||
+    (isRealDrape ? activeDisplayUri : null) ||
+    (isRealMapDrape ? tryonResultsMap[activeGarment.id] : null) ||
+    currentPersonPhoto ||
+    defaultModelUri;
 
   // Measurements computation (Prioritizes real scan from flexible body-fit engine)
   const measurements: BodyMeasurements = userMeasurements ? { ...userMeasurements } : {
@@ -487,11 +507,21 @@ export const ResultView: React.FC<ResultViewProps> = ({
             
             {/* Mode: Final Outfit View (Person wearing dress perfectly) */}
             {viewMode === 'outfit' && (
-              <img
-                src={displayResultUri}
-                alt="Worn Look"
-                className={`w-full h-full object-contain transition-all duration-300 filter drop-shadow-xl ${ambienceFilterClass}`}
-              />
+              <div className="relative w-full h-full flex items-center justify-center">
+                <img
+                  src={displayResultUri}
+                  alt="Worn Look"
+                  className={`w-full h-full object-contain transition-all duration-300 filter drop-shadow-xl ${ambienceFilterClass}`}
+                />
+                {(isGeneratingAI || bodyFitLoading) && (
+                  <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-xs flex flex-col items-center justify-center rounded-2xl gap-3 z-10">
+                    <div className="w-10 h-10 border-3 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-white text-xs font-bold tracking-wide drop-shadow-md">
+                      {aiProgressMessage || 'Draping Saree On Your Body Structure...'}
+                    </span>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Mode: Fabric View (Macro weave closeup) */}
