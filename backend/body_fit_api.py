@@ -1,9 +1,13 @@
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import os, uuid, json, hashlib, shutil, requests
+from contextlib import asynccontextmanager
+import os, uuid, json, hashlib, shutil, requests, logging
 from PIL import Image, ImageOps
 from dotenv import load_dotenv
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 try:
     import replicate
@@ -17,7 +21,21 @@ ROOT_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
 
-app = FastAPI(title="Body-Fit Try-On AI Gateway")
+# Import AURA Core Database and API Router
+from app.api.v1.router import api_router
+from app.database import init_db
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Initializing VirtualFit AURA Gateway & Body-Fit Engine...")
+    try:
+        await init_db()
+    except Exception as e:
+        logger.warning(f"Database initialization deferred: {e}")
+    yield
+    logger.info("Shutting down VirtualFit Gateway...")
+
+app = FastAPI(title="VirtualFit & Body-Fit Try-On Gateway", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,6 +43,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount /v1 endpoints for standard kiosk flow (POST /v1/tryon, /v1/catalog, etc.)
+app.include_router(api_router, prefix="/v1")
 
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
@@ -80,8 +101,27 @@ def process(job_id: str, person_path: str, garment_path: str, result_path: str, 
                 f.write(resp.content)
             jobs[job_id] = {"status": "completed", "result_url": f"/results/{os.path.basename(result_path)}"}
         else:
-            # Fallback if Replicate token is not yet configured: preserve her exact photo
-            shutil.copyfile(person_path, result_path)
+            # Fallback if Replicate token is not yet configured: synthesize local body-fit drape onto her photo
+            try:
+                from app.services.tryon_synthesizer import tryon_synthesizer
+                user_pil = Image.open(person_path).convert("RGB")
+                gid = profile.get("garment_id", "garm_saree_01") if profile else "garm_saree_01"
+                tryon_synthesizer._drape_garment_onto_person(
+                    session_id=job_id,
+                    garment_id=gid,
+                    user_img=user_pil,
+                    garment_path=garment_path,
+                    selected_size=size_label
+                )
+                synth_filename = f"{job_id}_tryon_{gid}.jpg"
+                synth_path = os.path.join(tryon_synthesizer.captures_dir, synth_filename)
+                if os.path.exists(synth_path):
+                    shutil.copyfile(synth_path, result_path)
+                else:
+                    shutil.copyfile(person_path, result_path)
+            except Exception as synth_err:
+                logger.warning(f"Local synthesis warning: {synth_err}")
+                shutil.copyfile(person_path, result_path)
             jobs[job_id] = {"status": "completed", "result_url": f"/results/{os.path.basename(result_path)}"}
     except Exception as e:
         jobs[job_id] = {"status": "failed", "error": str(e)}
@@ -121,6 +161,9 @@ async def tryon(
             "drapeStyle": "pleats tucked tight at natural waist, pallu over left shoulder",
             "waistHipRatio": 0.82
         }
+
+    if profile_data:
+        profile_data["garment_id"] = garment_id
 
     person_filename = f"{uuid.uuid4()}.jpg"
     person_path = os.path.join(UPLOADS_DIR, person_filename)
@@ -170,8 +213,17 @@ async def tryon(
     return {"job_id": job_id}
 
 @app.get("/api/body-fit/jobs/{job_id}")
+@app.get("/api/body-fit/status/{job_id}")
 def get_job(job_id: str):
     return jobs.get(job_id, {"status": "not_found"})
+
+@app.get("/health", tags=["Health"])
+async def health_check():
+    return {
+        "status": "healthy",
+        "service": "VirtualFit Gateway & Body-Fit Engine",
+        "environment": "development"
+    }
 
 if __name__ == "__main__":
     import uvicorn

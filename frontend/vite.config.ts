@@ -16,10 +16,26 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         ws: true,
+        configure: (proxy) => {
+          proxy.on('error', (_err, _req, res) => {
+            if (res && 'writeHead' in res && !(res as any).headersSent) {
+              (res as any).writeHead(502, { 'Content-Type': 'application/json' });
+              (res as any).end(JSON.stringify({ error: 'Backend gateway connection reset' }));
+            }
+          });
+        },
       },
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (_err, _req, res) => {
+            if (res && 'writeHead' in res && !(res as any).headersSent) {
+              (res as any).writeHead(502, { 'Content-Type': 'application/json' });
+              (res as any).end(JSON.stringify({ error: 'Backend gateway connection reset' }));
+            }
+          });
+        },
       },
       '/results': {
         target: 'http://127.0.0.1:8000',
