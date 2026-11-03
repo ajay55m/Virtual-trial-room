@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from PIL import Image, ImageEnhance
 from dotenv import load_dotenv
 
@@ -274,11 +274,24 @@ def health():
     }
 
 @app.get("/")
-def root():
+def serve_index():
+    index_path = os.path.join(ROOT_DIR, "frontend", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
     return {
         "status": "online",
         "message": "VirtualFit AI Try-On Backend is running. POST to /tryon to generate virtual fittings."
     }
+
+@app.get("/data.js")
+def serve_data_js():
+    data_path = os.path.join(ROOT_DIR, "frontend", "data.js")
+    return FileResponse(data_path, media_type="application/javascript")
+
+@app.get("/app.js")
+def serve_app_js():
+    app_path = os.path.join(ROOT_DIR, "frontend", "app.js")
+    return FileResponse(app_path, media_type="application/javascript")
 
 if __name__ == "__main__":
     import uvicorn
