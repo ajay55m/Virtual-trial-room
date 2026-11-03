@@ -62,3 +62,6 @@ frontend/public/assets/final_person_fitted_showcase.png
 
 
 .neon
+backend/outputs/*.jpg
+backend/outputs/*.png
+backend/outputs/*.jpeg

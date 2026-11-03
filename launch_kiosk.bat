@@ -17,11 +17,11 @@ for /f "tokens=5" %%p in ('netstat -aon ^| findstr :5173 ^| findstr LISTENING 2^
 
 :: 1. Start Backend Gateway
 echo [*] Starting AURA FastAPI Gateway (Port 8000)...
-start "AURA API Gateway" /min powershell -NoExit -Command "cd 'C:\AI\backend'; python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
+start "AURA API Gateway" /min powershell -NoExit -Command "cd /d "%~dp0backend"; python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
 
 :: 2. Start Frontend Dev / Preview
 echo [*] Starting Kiosk Interactive Frontend (Port 5173)...
-start "AURA Kiosk UI" /min powershell -NoExit -Command "cd 'C:\AI\frontend'; npm run dev"
+start "AURA Kiosk UI" /min powershell -NoExit -Command "cd /d "%~dp0frontend"; npm run dev"
 
 :: Wait for services to initialize
 echo [*] Waiting for services to become healthy...
@@ -40,3 +40,5 @@ echo.
 echo [OK] AURA Kiosk running in Enterprise Kiosk Mode.
 echo      Press Alt+F4 to exit kiosk screen when finished.
 echo ======================================================================
+
+

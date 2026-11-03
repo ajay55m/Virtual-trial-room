@@ -19,11 +19,11 @@ Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue | ForEach-Obj
 
 # 1. Start Backend Gateway
 Write-Host "[*] Launching API Gateway (Port 8000)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd 'C:\AI\backend'; python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location "$PSScriptRoot\backend"; python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload" -WindowStyle Minimized
 
 # 2. Start Frontend
 Write-Host "[*] Launching Kiosk Touch UI (Port 5173)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd 'C:\AI\frontend'; npm run dev" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location "$PSScriptRoot\frontend"; npm run dev" -WindowStyle Minimized
 
 # 3. Healthcheck poll
 Write-Host "[*] Waiting for gateway healthcheck..." -ForegroundColor Yellow
@@ -47,3 +47,4 @@ if ($chromeExe) {
 
 Write-Host "`n[OK] Kiosk is live in full retail lockdown mode." -ForegroundColor Green
 Write-Host "     Press [Alt + F4] on keyboard to exit kiosk screen.`n" -ForegroundColor Gray
+
