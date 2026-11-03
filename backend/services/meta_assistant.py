@@ -26,9 +26,9 @@ def chat_with_maverick_stylist(
     """
     if is_meta_configured():
         try:
-            formatted_messages = [{"role": "system", "content": ASSISTANT_SYSTEM_PROMPT}]
+            formatted_messages: List[Dict[str, Any]] = [{"role": "system", "content": ASSISTANT_SYSTEM_PROMPT}]
             for m in messages:
-                role = m.get("role", "user")
+                role = str(m.get("role", "user"))
                 content = m.get("content", "")
                 formatted_messages.append({"role": role, "content": content})
 
@@ -36,9 +36,10 @@ def chat_with_maverick_stylist(
                 # Attach image to the last user message
                 last_msg = formatted_messages[-1]
                 data_url = bytes_to_data_url(image_bytes)
-                if isinstance(last_msg["content"], str):
+                current_content = last_msg.get("content")
+                if isinstance(current_content, str):
                     last_msg["content"] = [
-                        {"type": "text", "text": last_msg["content"]},
+                        {"type": "text", "text": current_content},
                         {"type": "image_url", "image_url": {"url": data_url}}
                     ]
 
@@ -47,15 +48,18 @@ def chat_with_maverick_stylist(
                 model=META_MODEL_VISION,
                 temperature=0.7
             )
-            reply = resp["choices"][0]["message"]["content"]
-            return reply
+            choice = resp.get("choices", [{}])[0]
+            reply = choice.get("message", {}).get("content", "")
+            return str(reply)
         except Exception as e:
             logger.warning(f"[MAVERICK ASSISTANT WARNING] {e}. Falling back to bespoke local stylist...")
 
     # Bespoke Stylist Fallback
     last_text = ""
-    if messages and isinstance(messages[-1].get("content"), str):
-        last_text = messages[-1].get("content").lower()
+    if messages:
+        c = messages[-1].get("content")
+        if isinstance(c, str):
+            last_text = c.lower()
 
     if "saree" in last_text or "pallu" in last_text:
         return "For this Banarasi silk saree, the classic Nivi drape with crisp front pleats tucked at the navel and the zari pallu pinned gracefully over the left shoulder offers timeless royal elegance. Pair with antique gold jhumkas for a complete regal look."
@@ -65,3 +69,4 @@ def chat_with_maverick_stylist(
         return "Our 3D spatial sizing engine confirms a bespoke tailored silhouette tailored to your exact shoulder and chest measurements with zero collar gap and precise drape drop."
     else:
         return "Welcome to VirtualFit AI Studio! I can advise you on garment draping, color harmony, and custom bespoke sizing for any outfit in our collection. How can I help refine your look today?"
+

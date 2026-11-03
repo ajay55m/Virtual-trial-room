@@ -19,8 +19,11 @@ from dotenv import load_dotenv
 # ---------------------------------------------------------------------------
 # Setup & Directory Paths
 # ---------------------------------------------------------------------------
+import sys
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 CACHE_FILE = os.path.join(OUTPUTS_DIR, "cache.json")
@@ -46,7 +49,7 @@ def get_gradio_client(token: Optional[str] = None):
         if "token" in sig.parameters:
             return Client("yisol/IDM-VTON", token=token)
         elif "hf_token" in sig.parameters:
-            return Client("yisol/IDM-VTON", hf_token=token)
+            return Client("yisol/IDM-VTON", **{"hf_token": token})  # type: ignore
         else:
             return Client("yisol/IDM-VTON", headers={"Authorization": f"Bearer {token}"})
     except Exception as e:
@@ -190,11 +193,17 @@ def analyze_garment_locally(image_bytes: bytes, filename: str = "") -> dict:
             if colors:
                 colors.sort(key=lambda c: c[0], reverse=True)
                 # Skip pure white/black background pixels if any
-                r, g, b = colors[0][1]
-                for count, (cr, cg, cb) in colors[:10]:
-                    if not (cr > 240 and cg > 240 and cb > 240) and not (cr < 15 and cg < 15 and cb < 15):
-                        r, g, b = cr, cg, cb
-                        break
+                r, g, b = 128, 128, 128
+                top_color = colors[0][1]
+                if isinstance(top_color, (tuple, list)) and len(top_color) >= 3:
+                    r, g, b = int(top_color[0]), int(top_color[1]), int(top_color[2])
+                for count_and_col in colors[:10]:
+                    col = count_and_col[1]
+                    if isinstance(col, (tuple, list)) and len(col) >= 3:
+                        cr, cg, cb = int(col[0]), int(col[1]), int(col[2])
+                        if not (cr > 240 and cg > 240 and cb > 240) and not (cr < 15 and cg < 15 and cb < 15):
+                            r, g, b = cr, cg, cb
+                            break
                 
                 # Simple color naming
                 if r > 180 and g < 70 and b < 70:
@@ -248,8 +257,8 @@ def analyze_garment_ai(image_bytes: bytes, filename: str = "") -> dict:
     if gemini_key:
         try:
             import google.generativeai as genai
-            genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            genai.configure(api_key=gemini_key)  # type: ignore
+            model = genai.GenerativeModel("gemini-1.5-flash")  # type: ignore
             
             prompt = """
 Analyze this garment image. Return ONLY valid JSON:
@@ -459,7 +468,7 @@ def validate_tryon_result(image_path: str, garment_data: dict) -> bool:
         ratio = np.sum(skin_mask) / skin_mask.size
         has_human = ratio > 0.04
         logger.info(f"[VALIDATOR] Human presence score: {ratio:.4f} (Valid person: {has_human})")
-        return has_human
+        return bool(has_human)
     except Exception as e:
         logger.warning(f"Validator check error: {e}")
         return True  # Fallback to passing if check encounters unexpected error
@@ -732,7 +741,7 @@ async def tryon_fast_endpoint(
 
     from services.fast_tryon import fast_tryon
     try:
-        _, out_path, is_cached = fast_tryon(p_bytes, g_bytes, garment_type, OUTPUTS_DIR)
+        _, out_path, is_cached = fast_tryon(p_bytes, g_bytes, garment_type or "bandhgala_set", OUTPUTS_DIR)
         rel_url = f"/outputs/{os.path.basename(out_path)}"
         return {
             "status": "completed",

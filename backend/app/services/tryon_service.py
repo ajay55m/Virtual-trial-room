@@ -12,6 +12,8 @@ try:
     from google.genai import types
     GENAI_AVAILABLE = True
 except ImportError:
+    genai = None  # type: ignore
+    types = None  # type: ignore
     GENAI_AVAILABLE = False
 
 logger = logging.getLogger("tryon_service")
@@ -73,7 +75,7 @@ def validate_saree_result(result_path: str, api_key: Optional[str] = None) -> Di
     otherwise runs rigorous computer vision validation.
     """
     key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if key and GENAI_AVAILABLE:
+    if key and GENAI_AVAILABLE and genai is not None and types is not None:
         try:
             client = genai.Client(api_key=key)
             with open(result_path, "rb") as rf:
@@ -86,7 +88,7 @@ def validate_saree_result(result_path: str, api_key: Optional[str] = None) -> Di
                 model="gemini-2.5-flash",
                 contents=contents
             )
-            raw_text = resp.text.strip()
+            raw_text = (resp.text or "").strip()
             # Clean markdown formatting if present
             if "```json" in raw_text:
                 raw_text = raw_text.split("```json")[1].split("```")[0].strip()
@@ -146,8 +148,8 @@ def synthesize_ethnic_nivi_drape(customer_path: str, garment_path: str, template
         template_path = get_default_template_path()
     tmpl_bgr = cv2.imread(template_path)
 
-    if tmpl_bgr is None:
-        raise ValueError(f"Template image could not be loaded from {template_path}")
+    if cust_bgr is None or garm_bgr is None or tmpl_bgr is None:
+        raise ValueError(f"Images could not be loaded (customer, garment, or template)")
 
     target_h, target_w = 1024, 768
     cust_resized = cv2.resize(cust_bgr, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
@@ -243,7 +245,7 @@ def universal_tryon(
 
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
-    if gemini_key and GENAI_AVAILABLE:
+    if gemini_key and GENAI_AVAILABLE and genai is not None and types is not None:
         try:
             client = genai.Client(api_key=gemini_key)
             with open(customer_path, "rb") as cf:
@@ -282,8 +284,9 @@ def universal_tryon(
                 if response and hasattr(response, "candidates") and response.candidates:
                     first_cand = response.candidates[0]
                     if hasattr(first_cand, "content") and first_cand.content and hasattr(first_cand.content, "parts"):
-                        for part in first_cand.content.parts:
-                            if hasattr(part, "inline_data") and part.inline_data:
+                        parts = first_cand.content.parts or []
+                        for part in parts:
+                            if hasattr(part, "inline_data") and part.inline_data and part.inline_data.data:
                                 with open(output_path, "wb") as out_f:
                                     out_f.write(part.inline_data.data)
                                 saved = True

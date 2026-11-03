@@ -127,3 +127,4 @@ def analyze_garment_with_muse(
             "wearing_instructions": "Fit garment naturally to body contours, replacing existing clothes.",
             "tryon_prompt": "Dress Image1 person with garment from Image2. Do not paste image box. Preserve face/body 100%."
         }
+

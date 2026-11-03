@@ -3,7 +3,12 @@ import json
 import logging
 from typing import Dict, Any, Optional
 import numpy as np
-import cv2
+
+try:
+    import cv2
+except ImportError:
+    cv2 = None  # type: ignore
+
 from services.meta_client import call_meta_chat, bytes_to_data_url, is_meta_configured, META_MODEL_FAST
 
 logger = logging.getLogger("meta_validator")
@@ -72,8 +77,12 @@ def validate_with_llama_scout(
 
     # Fast Local Computer Vision Validator
     try:
+        if cv2 is None:
+            raise ValueError("OpenCV is not available")
         arr = np.frombuffer(result_bytes, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("Failed to decode image")
         h, w, _ = img.shape
 
         # 1. Lower body denim detection (65% to 92% height)

@@ -13,6 +13,8 @@ try:
     from google.genai import types
     GENAI_AVAILABLE = True
 except ImportError:
+    genai = None  # type: ignore
+    types = None  # type: ignore
     GENAI_AVAILABLE = False
 
 logger = logging.getLogger("fast_tryon")
@@ -111,7 +113,7 @@ def get_default_template_path(garment_type: str = "saree") -> str:
 
 def validate_tryon_image(result_bytes: bytes, gemini_key: Optional[str] = None) -> Dict[str, Any]:
     """Validates that try-on result is a real wearing result, not a pasted flat-lay, and jeans are gone."""
-    if gemini_key and GENAI_AVAILABLE:
+    if gemini_key and GENAI_AVAILABLE and genai is not None and types is not None:
         try:
             client = genai.Client(api_key=gemini_key)
             contents = [
@@ -122,7 +124,7 @@ def validate_tryon_image(result_bytes: bytes, gemini_key: Optional[str] = None) 
                 model="gemini-2.5-flash",
                 contents=contents
             )
-            raw = resp.text.strip()
+            raw = (resp.text or "").strip()
             if "```json" in raw:
                 raw = raw.split("```json")[1].split("```")[0].strip()
             elif "```" in raw:
@@ -135,6 +137,8 @@ def validate_tryon_image(result_bytes: bytes, gemini_key: Optional[str] = None) 
     try:
         arr = np.frombuffer(result_bytes, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("Failed to decode result image")
         h, w, _ = img.shape
         
         # Check lower body (65% to 92% height) for blue denim
@@ -171,6 +175,8 @@ def fast_local_synthesis(customer_bytes: bytes, garment_bytes: bytes, garment_ty
     """
     cust_arr = np.frombuffer(customer_bytes, np.uint8)
     cust_bgr = cv2.imdecode(cust_arr, cv2.IMREAD_COLOR)
+    if cust_bgr is None:
+        raise ValueError("Failed to decode customer image")
 
     target_h, target_w = 1024, 768
     cust_resized = cv2.resize(cust_bgr, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
@@ -244,10 +250,14 @@ def fast_local_synthesis(customer_bytes: bytes, garment_bytes: bytes, garment_ty
     elif is_saree:
         tmpl_path = get_default_template_path("saree")
         tmpl_bgr = cv2.imread(tmpl_path) if tmpl_path and os.path.exists(tmpl_path) else cust_resized.copy()
+        if tmpl_bgr is None:
+            tmpl_bgr = cust_resized.copy()
         tmpl_resized = cv2.resize(tmpl_bgr, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
 
         garm_arr = np.frombuffer(garment_bytes, np.uint8)
         garm_bgr = cv2.imdecode(garm_arr, cv2.IMREAD_COLOR)
+        if garm_bgr is None:
+            raise ValueError("Failed to decode garment image")
         tmpl_lab = cv2.cvtColor(tmpl_resized, cv2.COLOR_BGR2LAB)
         garm_lab = cv2.cvtColor(garm_bgr, cv2.COLOR_BGR2LAB)
         garm_l, garm_a, garm_b = cv2.split(garm_lab)
@@ -278,6 +288,8 @@ def fast_local_synthesis(customer_bytes: bytes, garment_bytes: bytes, garment_ty
         result_bgr = cust_resized.copy()
         garm_arr = np.frombuffer(garment_bytes, np.uint8)
         garm_bgr = cv2.imdecode(garm_arr, cv2.IMREAD_COLOR)
+        if garm_bgr is None:
+            raise ValueError("Failed to decode garment image")
         gw, gh = int(target_w * 0.72), int(target_h * 0.65)
         g_thumb = cv2.resize(garm_bgr, (gw, gh), interpolation=cv2.INTER_AREA)
         gx, gy = (target_w - gw) // 2, int(target_h * 0.26)
@@ -336,7 +348,7 @@ def fast_tryon(
 
     # 2. Live Single-Call Gemini 2.5 Flash Image Engine
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if gemini_key and GENAI_AVAILABLE:
+    if gemini_key and GENAI_AVAILABLE and genai is not None and types is not None:
         try:
             logger.info(f"[GEMINI 2.5 FLASH IMAGE] Starting single-call tryon for '{g_type_key}'...")
             client = genai.Client(api_key=gemini_key)
@@ -357,7 +369,8 @@ def fast_tryon(
 
                 result_bytes = None
                 if response and response.candidates and response.candidates[0].content:
-                    for part in response.candidates[0].content.parts:
+                    parts = response.candidates[0].content.parts or []
+                    for part in parts:
                         if hasattr(part, "inline_data") and part.inline_data:
                             result_bytes = part.inline_data.data
                             break
