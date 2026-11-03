@@ -1,589 +1,720 @@
 /**
- * VirtualFit AI Studio - Main App Controller
- * Manages Screens 1 to 4: Catalog, Capture & Demo Models, Fit Profile, and Premium AI Result
+ * VirtualFit AI Studio - Universal App Controller
+ * Universal 3-Stage Pipeline: Analyzer -> Standardizer -> Universal Try-On
  */
 
-// ---------------------------------------------------------------------------
-// Global Variables (Preserved as requested)
-// ---------------------------------------------------------------------------
-window.currentPersonBlob = null;
-window.currentPersonUrl = '';
+const API_BASE = window.location.port === "8000" ? "" : "http://localhost:8000";
 
-let selectedSaree = null;
-let webcamStream = null;
+// App State
+const state = {
+  currentStep: 1,
+  selectedGarment: null,
+  uploadedGarmentData: null,
+  selectedDemoModel: null,
+  personBlob: null,
+  personDataUrl: null,
+  personLabel: "Customer",
+  heightCm: 170,
+  webcamStream: null,
+  activeFilter: "all",
+  timerInterval: null
+};
 
-const API_BASE = (typeof window !== 'undefined' && window.location.origin.includes(':8000')) ? '' : 'http://127.0.0.1:8000';
+// DOM References
+const el = {
+  // Navigation
+  stepIndicators: [
+    document.getElementById("stepIndicator1"),
+    document.getElementById("stepIndicator2"),
+    document.getElementById("stepIndicator3"),
+    document.getElementById("stepIndicator4")
+  ],
+  screens: {
+    1: document.getElementById("screen1"),
+    2: document.getElementById("screen2"),
+    3: document.getElementById("screen3"),
+    4: document.getElementById("screen4")
+  },
+  backendStatusPill: document.getElementById("backendStatusPill"),
 
-// ---------------------------------------------------------------------------
-// Navigation / Screen Switcher Helper
-// ---------------------------------------------------------------------------
-function navigateToScreen(screenId) {
-  const screens = ['screen-catalog', 'screen-capture', 'screen-profile', 'screen-result'];
-  screens.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-      if (id === screenId) {
-        el.classList.remove('hidden');
-        el.classList.add('block');
-      } else {
-        el.classList.remove('block');
-        el.classList.add('hidden');
-      }
-    }
+  // Screen 1: Uploader & Catalog
+  customGarmentInput: document.getElementById("customGarmentInput"),
+  detectedGarmentCard: document.getElementById("detectedGarmentCard"),
+  detectedGarmentThumb: document.getElementById("detectedGarmentThumb"),
+  badgeGarmentType: document.getElementById("badgeGarmentType"),
+  badgeCategory: document.getElementById("badgeCategory"),
+  badgeGender: document.getElementById("badgeGender"),
+  detectedGarmentName: document.getElementById("detectedGarmentName"),
+  detectedWearingRule: document.getElementById("detectedWearingRule"),
+  btnTryDetectedGarment: document.getElementById("btnTryDetectedGarment"),
+  filterTabs: document.querySelectorAll(".filter-tab"),
+  universalGarmentGrid: document.getElementById("universalGarmentGrid"),
+
+  // Screen 2: Demo Models & Webcam
+  demoModelsGrid: document.getElementById("demoModelsGrid"),
+  webcamVideo: document.getElementById("webcamVideo"),
+  cameraGuideOverlay: document.getElementById("cameraGuideOverlay"),
+  cameraCanvas: document.getElementById("cameraCanvas"),
+  cameraPreviewImg: document.getElementById("cameraPreviewImg"),
+  cameraLiveControls: document.getElementById("cameraLiveControls"),
+  cameraReviewControls: document.getElementById("cameraReviewControls"),
+  btnStartCamera: document.getElementById("btnStartCamera"),
+  btnSnapPhoto: document.getElementById("btnSnapPhoto"),
+  btnRetakeCamera: document.getElementById("btnRetakeCamera"),
+  btnAcceptCamera: document.getElementById("btnAcceptCamera"),
+  btnBackToScreen1: document.getElementById("btnBackToScreen1"),
+
+  // Screen 3: Review Fit Profile
+  reviewPersonThumb: document.getElementById("reviewPersonThumb"),
+  reviewPersonName: document.getElementById("reviewPersonName"),
+  reviewGarmentThumb: document.getElementById("reviewGarmentThumb"),
+  reviewGarmentName: document.getElementById("reviewGarmentName"),
+  reviewGarmentBadge: document.getElementById("reviewGarmentBadge"),
+  reviewWearingRule: document.getElementById("reviewWearingRule"),
+  inputHeightCm: document.getElementById("inputHeightCm"),
+  displayFeetInches: document.getElementById("displayFeetInches"),
+  btnHeightMinus: document.getElementById("btnHeightMinus"),
+  btnHeightPlus: document.getElementById("btnHeightPlus"),
+  btnGenerateUniversalTryOn: document.getElementById("btnGenerateUniversalTryOn"),
+  btnBackToScreen2: document.getElementById("btnBackToScreen2"),
+
+  // Screen 4: Result & Before/After Slider
+  resultLoadingBox: document.getElementById("resultLoadingBox"),
+  resultSuccessBox: document.getElementById("resultSuccessBox"),
+  loadingStepStatus: document.getElementById("loadingStepStatus"),
+  loadingElapsedTimer: document.getElementById("loadingElapsedTimer"),
+  resultGarmentTitle: document.getElementById("resultGarmentTitle"),
+  btnDownloadResult: document.getElementById("btnDownloadResult"),
+  resultImageAfter: document.getElementById("resultImageAfter"),
+  resultImageBefore: document.getElementById("resultImageBefore"),
+  beforeWrapper: document.getElementById("beforeWrapper"),
+  compareDivider: document.getElementById("compareDivider"),
+  compareSlider: document.getElementById("compareSlider"),
+  resultGarmentThumbSide: document.getElementById("resultGarmentThumbSide"),
+  resultGarmentNameSide: document.getElementById("resultGarmentNameSide"),
+  resultGarmentPriceSide: document.getElementById("resultGarmentPriceSide"),
+  resultTypeDisplay: document.getElementById("resultTypeDisplay"),
+  resultCategoryDisplay: document.getElementById("resultCategoryDisplay"),
+  resultDescSide: document.getElementById("resultDescSide"),
+  universalQuickTryTrack: document.getElementById("universalQuickTryTrack"),
+  btnBackToCatalogFromResult: document.getElementById("btnBackToCatalogFromResult"),
+  btnNewCustomerSession: document.getElementById("btnNewCustomerSession")
+};
+
+// ========================================================
+// INITIALIZATION
+// ========================================================
+document.addEventListener("DOMContentLoaded", () => {
+  renderUniversalCatalog();
+  renderDemoModels();
+  if (window.UNIVERSAL_GARMENTS && window.UNIVERSAL_GARMENTS.length > 0) {
+    selectGarment(window.UNIVERSAL_GARMENTS[0], false);
+  }
+  bindAppEvents();
+  checkHealth();
+});
+
+// ========================================================
+// SCREEN 1: CATALOG & STAGE 1/2 UPLOADER
+// ========================================================
+function renderUniversalCatalog() {
+  if (!el.universalGarmentGrid || !window.UNIVERSAL_GARMENTS) return;
+  el.universalGarmentGrid.innerHTML = "";
+
+  const filtered = window.UNIVERSAL_GARMENTS.filter((g) => {
+    if (state.activeFilter === "all") return true;
+    if (state.activeFilter === "upper_body") return g.category === "upper_body";
+    if (state.activeFilter === "full_body") return g.category === "full_body";
+    if (state.activeFilter === "male") return g.gender === "male" || g.gender === "unisex";
+    if (state.activeFilter === "female") return g.gender === "female" || g.gender === "unisex";
+    return true;
   });
 
-  // Update top navigation bar step styling
-  const stepMap = {
-    'screen-catalog': 1,
-    'screen-capture': 2,
-    'screen-profile': 3,
-    'screen-result': 4
-  };
-  const activeStep = stepMap[screenId] || 1;
-
-  for (let i = 1; i <= 4; i++) {
-    const navEl = document.getElementById(`navStep${i}`);
-    if (navEl) {
-      if (i === activeStep) {
-        navEl.className = 'px-3.5 py-1.5 rounded-full transition-colors flex items-center gap-1.5 bg-orange-600 text-white shadow-md shadow-orange-600/30';
-        const badge = navEl.querySelector('span');
-        if (badge) badge.className = 'w-5 h-5 rounded-full bg-white/20 text-white flex items-center justify-center text-[10px]';
-      } else if (i < activeStep) {
-        navEl.className = 'px-3.5 py-1.5 rounded-full transition-colors flex items-center gap-1.5 bg-orange-50 text-orange-700 font-bold';
-        const badge = navEl.querySelector('span');
-        if (badge) badge.className = 'w-5 h-5 rounded-full bg-orange-200 text-orange-800 flex items-center justify-center text-[10px]';
-      } else {
-        navEl.className = 'px-3.5 py-1.5 rounded-full transition-colors flex items-center gap-1.5 text-slate-400';
-        const badge = navEl.querySelector('span');
-        if (badge) badge.className = 'w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-[10px]';
-      }
-    }
-  }
-
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-// ===========================================================================
-// SCREEN 1: CATALOG - Saree Selection Grid
-// ===========================================================================
-function renderCatalog() {
-  const container = document.getElementById('sareeCatalogGrid');
-  if (!container) return;
-
-  const sarees = window.SAREES || [];
-  container.innerHTML = '';
-
-  sarees.forEach(saree => {
-    const card = document.createElement('div');
-    card.className = 'group bg-white rounded-3xl p-4 border border-slate-100 shadow-md hover:shadow-2xl transition-all duration-300 cursor-pointer flex flex-col justify-between hover:-translate-y-1';
-
+  filtered.forEach((garment) => {
+    const card = document.createElement("div");
+    card.className = "group bg-white rounded-2xl overflow-hidden border border-slate-200/80 hover:border-orange-500 hover:shadow-xl transition-all cursor-pointer flex flex-col justify-between";
+    
     card.innerHTML = `
-      <div class="relative w-full aspect-[3/4] rounded-2xl overflow-hidden bg-slate-100 mb-4 flex items-center justify-center">
-        <img 
-          src="${saree.img}" 
-          alt="${saree.name}" 
-          class="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-          onerror="
-            this.style.display='none'; 
-            this.nextElementSibling.style.display='flex';
-          "
-        />
-        <!-- Fallback Colored Card with Name if image missing -->
-        <div class="hidden w-full h-full flex-col items-center justify-center p-4 text-center text-white" style="background: ${saree.color || '#ea580c'}">
-          <svg class="w-10 h-10 mb-2 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
-          <span class="text-xs font-bold leading-tight drop-shadow">${saree.name}</span>
-        </div>
-        <span class="absolute top-3 right-3 bg-white/90 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-extrabold text-orange-600 shadow-sm">
-          ${saree.price}
+      <div class="aspect-[3/4] bg-slate-100 overflow-hidden relative">
+        <img src="${garment.img}" alt="${garment.name}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onerror="this.src='https://placehold.co/600x800/f8fafc/ea580c?text=${encodeURIComponent(garment.type)}'">
+        <span class="absolute top-2.5 left-2.5 text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/90 text-slate-800 shadow-sm">
+          ${garment.badge || garment.type}
+        </span>
+        <span class="absolute top-2.5 right-2.5 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-orange-600 text-white shadow-sm">
+          ${garment.price}
         </span>
       </div>
-      <div>
-        <h3 class="font-bold text-slate-900 text-sm line-clamp-1 group-hover:text-orange-600 transition">${saree.name}</h3>
-        <p class="text-xs text-slate-400 mt-0.5 line-clamp-2">${saree.garment_desc}</p>
-        <button class="mt-3 w-full py-2.5 rounded-xl bg-slate-50 group-hover:bg-orange-600 group-hover:text-white text-slate-700 text-xs font-bold transition flex items-center justify-center gap-1.5">
+      <div class="p-3.5 flex flex-col justify-between flex-1">
+        <div>
+          <h3 class="font-bold text-xs sm:text-sm text-slate-900 line-clamp-2 leading-tight">${garment.name}</h3>
+          <p class="text-[11px] text-slate-400 mt-1 capitalize">${garment.category.replace('_', ' ')} • ${garment.gender}</p>
+        </div>
+        <button class="mt-3 w-full py-2 bg-orange-50 group-hover:bg-orange-600 group-hover:text-white text-orange-700 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1">
           <span>Select & Try On</span>
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          <span>➔</span>
         </button>
       </div>
     `;
 
-    card.addEventListener('click', () => {
-      selectedSaree = saree;
-      navigateToScreen('screen-capture');
+    card.addEventListener("click", () => {
+      selectGarment(garment, true);
     });
 
-    container.appendChild(card);
+    el.universalGarmentGrid.appendChild(card);
   });
 }
 
-// ===========================================================================
-// SCREEN 2: CAPTURE + DEMO MODELS
-// ===========================================================================
+function selectGarment(garment, advanceToStep2 = true) {
+  state.selectedGarment = garment;
+  state.uploadedGarmentData = null;
+
+  // Update Review Card in Step 3
+  if (el.reviewGarmentThumb) el.reviewGarmentThumb.src = garment.img;
+  if (el.reviewGarmentName) el.reviewGarmentName.textContent = garment.name;
+  if (el.reviewGarmentBadge) el.reviewGarmentBadge.textContent = `${garment.type.toUpperCase()} • ${garment.category.toUpperCase()}`;
+  if (el.reviewWearingRule) el.reviewWearingRule.textContent = garment.wearing_instructions || "Fit naturally to customer posture";
+
+  if (advanceToStep2) {
+    goToStep(2);
+  }
+}
+
+// Stage 1 & 2: Handle Custom Upload of ANY dress
+async function handleCustomGarmentUpload(file) {
+  if (!file) return;
+
+  // Show processing card
+  el.detectedGarmentCard.classList.remove("hidden");
+  el.detectedGarmentName.textContent = "Analyzing uploaded garment with AI...";
+  el.detectedWearingRule.textContent = "Detecting category, gender, color, and wearing instructions...";
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    el.detectedGarmentThumb.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+
+  try {
+    const formData = new FormData();
+    formData.append("garment", file);
+
+    // Call Stage 1 Analyzer
+    const res = await fetch(`${API_BASE}/api/analyze-garment`, {
+      method: "POST",
+      body: formData
+    });
+    const data = await res.json();
+    console.log("Stage 1 Analysis Result:", data);
+
+    if (data.success && data.garment_data) {
+      const g = data.garment_data;
+      state.uploadedGarmentData = g;
+
+      // Update Detected Badges
+      el.badgeGarmentType.textContent = g.garment_type.toUpperCase();
+      el.badgeCategory.textContent = g.category.replace('_', ' ').toUpperCase();
+      el.badgeGender.textContent = g.target_gender.toUpperCase();
+      el.detectedGarmentName.textContent = `${g.primary_color.toUpperCase()} ${g.garment_type.toUpperCase()}`;
+      el.detectedWearingRule.textContent = g.wearing_instructions;
+
+      // Create Garment Object
+      state.selectedGarment = {
+        id: `custom_${Date.now()}`,
+        name: `Custom ${g.primary_color} ${g.garment_type}`.toUpperCase(),
+        type: g.garment_type,
+        category: g.category,
+        gender: g.target_gender,
+        price: "Custom Upload",
+        img: el.detectedGarmentThumb.src,
+        file: file,
+        wearing_instructions: g.wearing_instructions,
+        garment_desc: `a ${g.primary_color} ${g.pattern} ${g.garment_type}, ${g.wearing_instructions}`
+      };
+
+      // Call Stage 2 Standardizer in background
+      fetch(`${API_BASE}/api/standardize-garment`, {
+        method: "POST",
+        body: formData
+      }).then(r => r.json()).then(stdData => {
+        if (stdData.standardized_url) {
+          state.selectedGarment.standardized_url = stdData.standardized_url;
+          console.log("Stage 2 Standardized URL:", stdData.standardized_url);
+        }
+      }).catch(err => console.warn("Stage 2 standardization note:", err));
+    }
+  } catch (err) {
+    console.error("Custom garment analysis error:", err);
+    el.detectedGarmentName.textContent = "Custom Garment Uploaded";
+    el.detectedWearingRule.textContent = "Auto-mapped to body fitting.";
+  }
+}
+
+// ========================================================
+// SCREEN 2: DEMO MODELS (Male & Female) & WEBCAM
+// ========================================================
 function renderDemoModels() {
-  const container = document.getElementById('demoModelsList');
-  if (!container) return;
+  if (!el.demoModelsGrid || !window.DEMO_MODELS) return;
+  el.demoModelsGrid.innerHTML = "";
 
-  const models = window.DEMO_MODELS || [];
-  container.innerHTML = '';
-
-  models.forEach(model => {
-    const card = document.createElement('div');
-    card.className = 'group flex-shrink-0 w-36 bg-slate-50 hover:bg-orange-50 border border-slate-200 hover:border-orange-300 rounded-2xl p-2.5 cursor-pointer transition text-center shadow-sm hover:shadow-md';
+  window.DEMO_MODELS.forEach((model) => {
+    const card = document.createElement("div");
+    card.className = `p-3 rounded-2xl border-2 transition-all cursor-pointer text-center bg-slate-50 hover:border-orange-500 hover:bg-orange-50/30 ${
+      state.selectedDemoModel && state.selectedDemoModel.id === model.id
+        ? "border-orange-600 bg-orange-50 shadow-md ring-2 ring-orange-200"
+        : "border-slate-200"
+    }`;
+    card.dataset.id = model.id;
 
     card.innerHTML = `
-      <div class="relative w-full aspect-[3/4] rounded-xl overflow-hidden bg-slate-200 mb-2">
-        <img 
-          src="${model.img}" 
-          alt="${model.name}" 
-          class="w-full h-full object-cover group-hover:scale-105 transition"
-          onerror="
-            this.style.display='none'; 
-            this.nextElementSibling.style.display='flex';
-          "
-        />
-        <div class="hidden w-full h-full bg-slate-700 text-white flex-col items-center justify-center p-2 text-[10px] font-bold">
-          <span>${model.name}</span>
-        </div>
+      <div class="aspect-[3/4] rounded-xl overflow-hidden bg-slate-200 mb-2 relative">
+        <img src="${model.img}" alt="${model.name}" class="w-full h-full object-cover">
+        <span class="absolute top-1.5 left-1.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/60 text-white">
+          ${model.gender}
+        </span>
       </div>
-      <div class="text-[11px] font-bold text-slate-800 line-clamp-1 group-hover:text-orange-600">${model.name}</div>
-      <span class="text-[9px] font-semibold text-slate-400">Instant Pre-scan</span>
+      <h4 class="font-bold text-slate-800 text-xs">${model.name}</h4>
+      <span class="text-[10px] text-slate-400 font-medium">${model.desc.split("•")[1] || "170 cm"}</span>
     `;
 
-    card.addEventListener('click', () => {
-      selectDemoModel(model);
-    });
-
-    container.appendChild(card);
+    card.addEventListener("click", () => selectDemoModel(model));
+    el.demoModelsGrid.appendChild(card);
   });
 }
 
 async function selectDemoModel(model) {
+  state.selectedDemoModel = model;
+  state.personLabel = `${model.name} (${model.gender})`;
+  state.heightCm = model.height || 170;
+
+  stopWebcam();
+
   try {
     const res = await fetch(model.img);
     const blob = await res.blob();
-    window.currentPersonBlob = blob;
-    window.currentPersonUrl = URL.createObjectURL(blob);
-    showProfile();
+    state.personBlob = blob;
+    state.personDataUrl = model.img;
+
+    renderDemoModels(); // update selection highlight
+    goToStep(3);
   } catch (err) {
-    console.warn(`Could not fetch demo model image from ${model.img}:`, err);
-    // Fallback: create mock avatar canvas
-    const canvas = document.createElement('canvas');
-    canvas.width = 768;
-    canvas.height = 1024;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#f1f5f9';
-    ctx.fillRect(0, 0, 768, 1024);
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 36px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(model.name, 384, 512);
-
-    canvas.toBlob(blob => {
-      window.currentPersonBlob = blob;
-      window.currentPersonUrl = URL.createObjectURL(blob);
-      showProfile();
-    }, 'image/jpeg');
+    console.warn("Could not fetch model image directly, using URL path:", err);
+    state.personDataUrl = model.img;
+    goToStep(3);
   }
 }
 
-function initCameraControls() {
-  const startBtn = document.getElementById('startCamBtn');
-  const snapBtn = document.getElementById('snapBtn');
-  const video = document.getElementById('webcamVideo');
-  const placeholder = document.getElementById('cameraPlaceholder');
-
-  if (startBtn) {
-    startBtn.addEventListener('click', async () => {
-      try {
-        webcamStream = await navigator.mediaDevices.getUserMedia({ video: { width: 720, height: 960 } });
-        if (video) {
-          video.srcObject = webcamStream;
-          video.play();
-          if (placeholder) placeholder.style.display = 'none';
-        }
-      } catch (e) {
-        alert('Webcam access was denied or not available. Please pick a demo model above.');
-      }
-    });
-  }
-
-  if (snapBtn) {
-    snapBtn.addEventListener('click', () => {
-      if (!video || !video.videoWidth) {
-        alert('Please start the camera first or select a demo model above.');
-        return;
-      }
-      const canvas = document.getElementById('captureCanvas') || document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0);
-
-      canvas.toBlob(blob => {
-        window.currentPersonBlob = blob;
-        window.currentPersonUrl = URL.createObjectURL(blob);
-        // Stop stream
-        if (webcamStream) {
-          webcamStream.getTracks().forEach(t => t.stop());
-        }
-        showProfile();
-      }, 'image/jpeg');
-    });
-  }
-}
-
-// ===========================================================================
-// SCREEN 3: FIT PROFILE
-// ===========================================================================
-function showProfile() {
-  const profileImg = document.getElementById('profilePersonImg');
-  const sareeThumb = document.getElementById('profileSareeThumb');
-  const sareeName = document.getElementById('profileSareeName');
-  const sareePrice = document.getElementById('profileSareePrice');
-
-  if (profileImg && window.currentPersonUrl) {
-    profileImg.src = window.currentPersonUrl;
-  }
-  if (selectedSaree) {
-    if (sareeThumb) sareeThumb.src = selectedSaree.img;
-    if (sareeName) sareeName.textContent = selectedSaree.name;
-    if (sareePrice) sareePrice.textContent = selectedSaree.price;
-  }
-
-  navigateToScreen('screen-profile');
-}
-
-// ===========================================================================
-// AI TRY-ON EXECUTION (POST /tryon with retry, cache & enhance)
-// ===========================================================================
-async function doTryOn(customSaree = null) {
-  const saree = customSaree || selectedSaree;
-  if (!saree) {
-    alert('Please select a saree first.');
-    navigateToScreen('screen-catalog');
-    return;
-  }
-
-  if (!window.currentPersonBlob) {
-    alert('Please provide or capture a person photo.');
-    navigateToScreen('screen-capture');
-    return;
-  }
-
-  // Show loading spinner on Result Image stage
-  showResultLoading(true, "Draping new saree...");
-  navigateToScreen('screen-result');
-
+async function startWebcam() {
+  stopWebcam();
   try {
-    const formData = new FormData();
-    formData.append('person_image', window.currentPersonBlob, 'person.jpg');
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1080 }, height: { ideal: 1440 } },
+      audio: false
+    });
+    state.webcamStream = stream;
+    el.webcamVideo.srcObject = stream;
+    await el.webcamVideo.play();
+  } catch (err) {
+    console.error("Camera access error:", err);
+    alert("Camera permission not available. Please select one of the 4 demo models above.");
+  }
+}
 
-    // Fetch garment image as blob/file
-    let garmentBlob = null;
-    try {
-      const gRes = await fetch(saree.img);
-      garmentBlob = await gRes.blob();
-    } catch (gErr) {
-      console.warn(`Could not fetch garment from ${saree.img}:`, gErr);
-      // Fallback empty blob with garment_id
-      garmentBlob = new Blob([saree.name], { type: 'text/plain' });
+function stopWebcam() {
+  if (state.webcamStream) {
+    state.webcamStream.getTracks().forEach((track) => track.stop());
+    state.webcamStream = null;
+  }
+}
+
+function snapWebcamPhoto() {
+  const video = el.webcamVideo;
+  const canvas = el.cameraCanvas;
+  const ctx = canvas.getContext("2d");
+
+  canvas.width = 768;
+  canvas.height = 1024;
+
+  if (video.videoWidth > 0 && video.videoHeight > 0) {
+    const videoAspect = video.videoWidth / video.videoHeight;
+    const targetAspect = 768 / 1024;
+    let sx = 0, sy = 0, sWidth = video.videoWidth, sHeight = video.videoHeight;
+
+    if (videoAspect > targetAspect) {
+      sWidth = video.videoHeight * targetAspect;
+      sx = (video.videoWidth - sWidth) / 2;
+    } else {
+      sHeight = video.videoWidth / targetAspect;
+      sy = (video.videoHeight - sHeight) / 2;
     }
 
-    formData.append('garment_image', garmentBlob, `${saree.id || 'garment'}.jpg`);
-    formData.append('garment_id', saree.id || 'saree');
-    formData.append('garment_des', saree.garment_desc || saree.name);
-    formData.append('category', saree.category || 'dresses');
+    ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, 768, 1024);
+  } else {
+    ctx.fillStyle = "#cbd5e1";
+    ctx.fillRect(0, 0, 768, 1024);
+  }
+
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
+  state.personDataUrl = dataUrl;
+  state.personLabel = "Live Customer Photo";
+  state.selectedDemoModel = null;
+
+  canvas.toBlob((blob) => {
+    state.personBlob = blob;
+  }, "image/jpeg", 0.95);
+
+  el.cameraPreviewImg.src = dataUrl;
+  el.cameraPreviewImg.classList.remove("hidden");
+  el.webcamVideo.classList.add("hidden");
+  el.cameraGuideOverlay.classList.add("hidden");
+  el.cameraLiveControls.classList.add("hidden");
+  el.cameraReviewControls.classList.remove("hidden");
+  stopWebcam();
+}
+
+function resetCameraView() {
+  el.cameraPreviewImg.classList.add("hidden");
+  el.webcamVideo.classList.remove("hidden");
+  el.cameraGuideOverlay.classList.remove("hidden");
+  el.cameraLiveControls.classList.remove("hidden");
+  el.cameraReviewControls.classList.add("hidden");
+  startWebcam();
+}
+
+// ========================================================
+// SCREEN 3: FIT PROFILE & HEIGHT
+// ========================================================
+function updateScreen3Profile() {
+  if (state.personDataUrl) {
+    el.reviewPersonThumb.src = state.personDataUrl;
+    el.reviewPersonName.textContent = state.personLabel;
+  }
+  if (state.selectedGarment) {
+    el.reviewGarmentThumb.src = state.selectedGarment.img;
+    el.reviewGarmentName.textContent = state.selectedGarment.name;
+    el.reviewGarmentBadge.textContent = `${state.selectedGarment.type.toUpperCase()} • ${state.selectedGarment.category.replace('_', ' ').toUpperCase()}`;
+    el.reviewWearingRule.textContent = state.selectedGarment.wearing_instructions || "Fit naturally to customer posture";
+  }
+  updateHeight(state.heightCm);
+}
+
+function updateHeight(cm) {
+  const clamped = Math.max(130, Math.min(220, cm));
+  state.heightCm = clamped;
+  if (el.inputHeightCm) el.inputHeightCm.value = clamped;
+  
+  const totalInches = clamped / 2.54;
+  const feet = Math.floor(totalInches / 12);
+  const inches = Math.round(totalInches % 12);
+  if (el.displayFeetInches) el.displayFeetInches.textContent = `${feet} ft ${inches} in`;
+}
+
+// ========================================================
+// SCREEN 4: STAGE 3 UNIVERSAL TRY-ON INFERENCE
+// ========================================================
+async function generateUniversalTryOn() {
+  if (!state.personBlob && !state.personDataUrl) {
+    alert("Please select a demo model or take a photo first.");
+    goToStep(2);
+    return;
+  }
+  if (!state.selectedGarment) {
+    alert("Please select a garment first.");
+    goToStep(1);
+    return;
+  }
+
+  goToStep(4);
+
+  // Show loading spinner
+  el.resultLoadingBox.classList.remove("hidden");
+  el.resultSuccessBox.classList.add("hidden");
+
+  let elapsed = 0;
+  el.loadingElapsedTimer.textContent = "0s";
+  if (state.timerInterval) clearInterval(state.timerInterval);
+
+  const steps = [
+    "Stage 1: Validating garment structural contours...",
+    "Stage 2: Standardizing fabric textures & boundaries...",
+    "Stage 3: Generating universal try-on with neural diffusion...",
+    "Stage 4: Running self-checking validator loop...",
+    "Applying Pillow sharpness & contrast enhancements..."
+  ];
+  let stepIdx = 0;
+  el.loadingStepStatus.textContent = steps[0];
+
+  state.timerInterval = setInterval(() => {
+    elapsed += 1;
+    el.loadingElapsedTimer.textContent = `${elapsed}s`;
+    if (elapsed % 6 === 0) {
+      stepIdx = (stepIdx + 1) % steps.length;
+      el.loadingStepStatus.textContent = steps[stepIdx];
+    }
+  }, 1000);
+
+  try {
+    // 1. Resolve Person Blob
+    let pBlob = state.personBlob;
+    if (!pBlob && state.personDataUrl) {
+      const pRes = await fetch(state.personDataUrl);
+      pBlob = await pRes.blob();
+    }
+
+    // 2. Resolve Garment Blob
+    let gBlob = state.selectedGarment.file;
+    if (!gBlob) {
+      const gRes = await fetch(state.selectedGarment.img);
+      gBlob = await gRes.blob();
+    }
+
+    // 3. Prepare FormData for /api/tryon
+    const formData = new FormData();
+    formData.append("person", pBlob, "person.jpg");
+    formData.append("garment", gBlob, "garment.jpg");
+    formData.append("garment_id", state.selectedGarment.id);
+    formData.append("category", state.selectedGarment.category);
+    formData.append("height", state.heightCm);
+
+    // Pass garment_data JSON
+    const garmentDataObj = state.uploadedGarmentData || {
+      garment_type: state.selectedGarment.type,
+      category: state.selectedGarment.category,
+      target_gender: state.selectedGarment.gender,
+      components: [state.selectedGarment.type],
+      primary_color: state.selectedGarment.color || "black",
+      pattern: state.selectedGarment.pattern || "plain",
+      wearing_instructions: state.selectedGarment.wearing_instructions
+    };
+    formData.append("garment_data", JSON.stringify(garmentDataObj));
+
+    console.log(`[STAGE 3] Dispatching /tryon for: ${state.selectedGarment.name} (${state.selectedGarment.category})`);
 
     const response = await fetch(`${API_BASE}/tryon`, {
-      method: 'POST',
+      method: "POST",
       body: formData
     });
 
-    if (!response.ok) {
-      throw new Error(`Server returned HTTP ${response.status}`);
-    }
-
     const data = await response.json();
-    const resultUrl = data.result_url?.startsWith('http') 
-      ? data.result_url 
-      : `${API_BASE}${data.result_url}`;
+    console.log("[STAGE 3] Try-On Response:", data);
 
-    showResult(resultUrl, saree);
-  } catch (err) {
-    console.error('Try-on generation error:', err);
-    // Graceful fallback to guarantee UI displays
-    showResult(saree.img, saree);
-  } finally {
-    showResultLoading(false);
-  }
-}
+    clearInterval(state.timerInterval);
 
-function showResultLoading(isLoading, message = "Generating...") {
-  let spinner = document.getElementById('resultLoadingOverlay');
-  const container = document.getElementById('result-image-container');
-
-  if (isLoading) {
-    if (!spinner && container) {
-      spinner = document.createElement('div');
-      spinner.id = 'resultLoadingOverlay';
-      spinner.className = 'absolute inset-0 z-40 bg-slate-950/80 backdrop-blur-md rounded-3xl flex flex-col items-center justify-center text-white';
-      spinner.innerHTML = `
-        <div class="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p id="spinnerText" class="text-sm font-extrabold tracking-wide text-orange-400">Draping new saree...</p>
-        <p class="text-[11px] text-slate-400 mt-1">Applying IDM-VTON diffusion & Pillow enhancement</p>
-      `;
-      const stage = container.querySelector('.relative');
-      if (stage) stage.appendChild(spinner);
-    } else if (spinner) {
-      spinner.style.display = 'flex';
-      const text = spinner.querySelector('#spinnerText');
-      if (text) text.textContent = message;
+    if (data.status === "completed" && data.result_url) {
+      showTryOnSuccess(data.result_url);
+    } else {
+      throw new Error(data.error || "Try-On generation did not return a valid result.");
     }
-  } else if (spinner) {
-    spinner.style.display = 'none';
+  } catch (err) {
+    clearInterval(state.timerInterval);
+    console.error("Universal try-on error:", err);
+    alert(`Try-on error: ${err.message || String(err)}. Falling back to preview.`);
+    showTryOnSuccess(state.selectedGarment.img);
   }
 }
 
-// ===========================================================================
-// SCREEN 4: PREMIUM AI RESULT
-// ===========================================================================
+function showTryOnSuccess(resultUrl) {
+  el.resultLoadingBox.classList.add("hidden");
+  el.resultSuccessBox.classList.remove("hidden");
 
-// 1. showResult: updates resultImg, beforeImg, name, price, desc, customer thumb
-function showResult(resultUrl, saree) {
-  const resultImg = document.getElementById('resultImg');
-  const beforeImg = document.getElementById('beforeImg');
-  const sareeName = document.getElementById('resultSareeName');
-  const sareePrice = document.getElementById('resultSareePrice');
-  const sareeDesc = document.getElementById('resultDesc');
-  const personThumb = document.getElementById('resultPersonThumb');
-  const compareSlider = document.getElementById('compareSlider');
+  const fullResultUrl = resultUrl.startsWith("http") ? resultUrl : `${API_BASE}${resultUrl}`;
+  
+  // Set images for Before/After Slider
+  el.resultImageAfter.src = fullResultUrl;
+  el.resultImageBefore.src = state.personDataUrl;
+  el.btnDownloadResult.href = fullResultUrl;
 
-  if (resultImg) resultImg.src = resultUrl;
-  if (beforeImg) {
-    beforeImg.src = window.currentPersonUrl || resultUrl;
-    // Set 50% default comparison
-    beforeImg.style.clipPath = 'inset(0 50% 0 0)';
-  }
-  if (compareSlider) compareSlider.value = 50;
+  // Set Details
+  const garment = state.selectedGarment;
+  el.resultGarmentTitle.textContent = garment.name;
+  el.resultGarmentThumbSide.src = garment.img;
+  el.resultGarmentNameSide.textContent = garment.name;
+  el.resultGarmentPriceSide.textContent = garment.price;
+  el.resultTypeDisplay.textContent = garment.type.toUpperCase();
+  el.resultCategoryDisplay.textContent = garment.category.replace('_', ' ').toUpperCase();
+  el.resultDescSide.textContent = garment.wearing_instructions || "Custom fit adapted to stature.";
 
-  if (personThumb && window.currentPersonUrl) {
-    personThumb.src = window.currentPersonUrl;
-  }
+  // Render bottom quick try strip
+  renderQuickTryStrip();
 
-  if (saree) {
-    selectedSaree = saree;
-    if (sareeName) sareeName.textContent = saree.name;
-    if (sareePrice) sareePrice.textContent = saree.price;
-    if (sareeDesc) sareeDesc.textContent = saree.garment_desc;
-  }
-
-  navigateToScreen('screen-result');
-}
-
-// 2. compareSlider Event: clipPath = inset(0 ${100-value}% 0 0)
-function initCompareSlider() {
-  const slider = document.getElementById('compareSlider');
-  const beforeImg = document.getElementById('beforeImg');
-  const dividerLine = document.getElementById('sliderDividerLine');
-
-  if (slider && beforeImg) {
-    slider.addEventListener('input', (e) => {
-      const val = Number(e.target.value);
-      beforeImg.style.clipPath = `inset(0 ${100 - val}% 0 0)`;
-      if (dividerLine) {
-        dividerLine.style.left = `${val}%`;
-      }
-    });
+  // Reset comparison slider to 50%
+  if (el.compareSlider) {
+    el.compareSlider.value = 50;
+    updateSlider(50);
   }
 }
 
-// 3. downloadBtn: create <a> download from resultImg.src
-function initDownloadButton() {
-  const downloadBtn = document.getElementById('downloadBtn');
-  const resultImg = document.getElementById('resultImg');
-
-  if (downloadBtn) {
-    downloadBtn.addEventListener('click', () => {
-      if (!resultImg || !resultImg.src) return;
-      const a = document.createElement('a');
-      a.href = resultImg.src;
-      a.download = `virtualfit-${selectedSaree ? selectedSaree.id : 'tryon'}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    });
-  }
+function updateSlider(val) {
+  if (el.beforeWrapper) el.beforeWrapper.style.width = `${val}%`;
+  if (el.compareDivider) el.compareDivider.style.left = `${val}%`;
+  if (el.resultImageBefore) el.resultImageBefore.style.width = `${100 / (val / 100)}%`;
 }
 
-// 4. shareBtn: use navigator.share if available, else copy link alert
-function initShareButton() {
-  const shareBtn = document.getElementById('shareBtn');
+function renderQuickTryStrip() {
+  if (!el.universalQuickTryTrack || !window.UNIVERSAL_GARMENTS) return;
+  el.universalQuickTryTrack.innerHTML = "";
 
-  if (shareBtn) {
-    shareBtn.addEventListener('click', async () => {
-      const title = 'VirtualFit AI Studio - Virtual Saree Try-On';
-      const text = `Take a look at how I look in ${selectedSaree ? selectedSaree.name : 'this saree'}!`;
-      const url = window.location.href;
+  window.UNIVERSAL_GARMENTS.forEach((item) => {
+    const card = document.createElement("div");
+    const isCurrent = state.selectedGarment && state.selectedGarment.id === item.id;
+    card.className = `flex-shrink-0 w-32 bg-white rounded-2xl p-2 border-2 cursor-pointer transition-all hover:scale-105 ${
+      isCurrent ? "border-orange-500 shadow-md ring-2 ring-orange-200" : "border-slate-200"
+    }`;
 
-      if (navigator.share) {
-        try {
-          await navigator.share({ title, text, url });
-        } catch (e) {
-          // User dismissed or share failed
-        }
-      } else {
-        try {
-          await navigator.clipboard.writeText(url);
-          alert('Try-on link copied to clipboard!');
-        } catch (e) {
-          alert(`Share link: ${url}`);
-        }
-      }
-    });
-  }
-}
-
-// 5. Render tryAnotherStrip: loop SAREES from data.js, click calls doTryOn() on same person
-function renderTryAnotherStrip() {
-  const track = document.getElementById('sareeThumbnailTrack') || document.getElementById('tryAnotherStrip');
-  if (!track) return;
-
-  const sarees = window.SAREES || [];
-  track.innerHTML = '';
-
-  sarees.forEach(saree => {
-    const thumbBtn = document.createElement('button');
-    thumbBtn.className = 'group flex-shrink-0 flex items-center gap-3 p-2 pr-4 rounded-2xl bg-slate-50 hover:bg-orange-50 border border-slate-200 hover:border-orange-400 transition text-left shadow-xs hover:shadow-md';
-
-    thumbBtn.innerHTML = `
-      <div class="w-12 h-16 rounded-xl overflow-hidden bg-slate-200 flex-shrink-0">
-        <img 
-          src="${saree.img}" 
-          alt="${saree.name}" 
-          class="w-full h-full object-cover group-hover:scale-110 transition"
-          onerror="
-            this.style.display='none'; 
-            this.nextElementSibling.style.display='flex';
-          "
-        />
-        <div class="hidden w-full h-full text-white items-center justify-center text-[8px] font-bold" style="background: ${saree.color || '#ea580c'}">
-          ${saree.name.slice(0, 4)}
-        </div>
+    card.innerHTML = `
+      <div class="aspect-[3/4] rounded-xl overflow-hidden bg-slate-100 mb-1.5 relative">
+        <img src="${item.img}" alt="${item.name}" class="w-full h-full object-cover">
+        ${isCurrent ? `<span class="absolute top-1 right-1 text-[8px] font-extrabold uppercase bg-orange-600 text-white px-1.5 py-0.5 rounded">Active</span>` : ""}
       </div>
-      <div class="min-w-0">
-        <div class="text-xs font-bold text-slate-900 group-hover:text-orange-600 truncate max-w-[130px]">${saree.name}</div>
-        <div class="text-[11px] font-extrabold text-orange-600">${saree.price}</div>
-      </div>
+      <p class="text-[11px] font-bold text-slate-800 line-clamp-1">${item.name}</p>
+      <p class="text-[10px] font-extrabold text-orange-600">${item.price}</p>
     `;
 
-    thumbBtn.addEventListener('click', () => {
-      doTryOn(saree);
+    card.addEventListener("click", () => {
+      selectGarment(item, false);
+      generateUniversalTryOn();
     });
 
-    track.appendChild(thumbBtn);
+    el.universalQuickTryTrack.appendChild(card);
   });
 }
 
-// 6. Zoom: on mouseenter/mousemove scale resultImg to 1.5 and follow mouse transform-origin
-function initZoomEffect() {
-  const container = document.getElementById('result-image-container');
-  const resultImg = document.getElementById('resultImg');
-  const zoomBtn = document.getElementById('zoomBtn');
-
-  if (!container || !resultImg) return;
-
-  const stage = container.querySelector('.relative');
-  if (!stage) return;
-
-  let isZoomActive = false;
-
-  const handleMouseMove = (e) => {
-    const rect = stage.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-    resultImg.style.transformOrigin = `${x}% ${y}%`;
-    resultImg.style.transform = 'scale(1.5)';
-  };
-
-  const handleMouseEnter = (e) => {
-    handleMouseMove(e);
-  };
-
-  const handleMouseLeave = () => {
-    if (!isZoomActive) {
-      resultImg.style.transform = 'scale(1)';
-      resultImg.style.transformOrigin = 'center center';
-    }
-  };
-
-  stage.addEventListener('mouseenter', handleMouseEnter);
-  stage.addEventListener('mousemove', handleMouseMove);
-  stage.addEventListener('mouseleave', handleMouseLeave);
-
-  // Floating Zoom button toggles persistent zoom
-  if (zoomBtn) {
-    zoomBtn.addEventListener('click', () => {
-      isZoomActive = !isZoomActive;
-      if (isZoomActive) {
-        resultImg.style.transform = 'scale(1.5)';
-        zoomBtn.classList.add('text-orange-600', 'ring-2', 'ring-orange-500');
-      } else {
-        resultImg.style.transform = 'scale(1)';
-        resultImg.style.transformOrigin = 'center center';
-        zoomBtn.classList.remove('text-orange-600', 'ring-2', 'ring-orange-500');
-      }
-    });
+// ========================================================
+// NAVIGATION & STEPPER
+// ========================================================
+function goToStep(step) {
+  if (step < 1 || step > 4) return;
+  if (step === 2 && !state.selectedGarment) return;
+  if (step >= 3 && !state.personBlob && !state.personDataUrl) {
+    goToStep(2);
+    return;
   }
 
-  // Fullscreen button toggles browser fullscreen
-  const fullscreenBtn = document.getElementById('fullscreenBtn');
-  if (fullscreenBtn) {
-    fullscreenBtn.addEventListener('click', () => {
-      if (!document.fullscreenElement) {
-        stage.requestFullscreen?.().catch(() => {});
-      } else {
-        document.exitFullscreen?.().catch(() => {});
+  if (state.currentStep === 2 && step !== 2) {
+    stopWebcam();
+  }
+
+  state.currentStep = step;
+
+  // Toggle Screen Views
+  Object.keys(el.screens).forEach((s) => {
+    const screen = el.screens[s];
+    if (parseInt(s) === step) {
+      screen.classList.remove("hidden");
+    } else {
+      screen.classList.add("hidden");
+    }
+  });
+
+  // Update Stepper Nav
+  el.stepIndicators.forEach((ind, idx) => {
+    const indStep = idx + 1;
+    if (indStep === step) {
+      ind.className = "step-indicator flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-orange-600 text-white shadow-sm transition";
+      ind.querySelector("span").className = "w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[11px] font-bold";
+    } else if (indStep < step) {
+      ind.className = "step-indicator flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-orange-100 text-orange-800 border border-orange-200 transition";
+      ind.querySelector("span").className = "w-5 h-5 rounded-full bg-orange-200 text-orange-900 flex items-center justify-center text-[11px] font-bold";
+    } else {
+      ind.className = "step-indicator flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-100 text-slate-500 transition";
+      ind.querySelector("span").className = "w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold";
+    }
+  });
+
+  if (step === 2) {
+    resetCameraView();
+  } else if (step === 3) {
+    updateScreen3Profile();
+  }
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+// ========================================================
+// HEALTH CHECK
+// ========================================================
+async function checkHealth() {
+  try {
+    const res = await fetch(`${API_BASE}/health`);
+    if (res.ok) {
+      const data = await res.json();
+      if (el.backendStatusPill) {
+        el.backendStatusPill.textContent = "Universal 3-Stage AI Ready";
+        el.backendStatusPill.className = "text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full";
       }
-    });
+    }
+  } catch (err) {
+    if (el.backendStatusPill) {
+      el.backendStatusPill.textContent = "Backend Offline (:8000)";
+      el.backendStatusPill.className = "text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 px-3 py-1 rounded-full";
+    }
   }
 }
 
-// ===========================================================================
-// INITIALIZATION ON DOMContentLoaded
-// ===========================================================================
-document.addEventListener('DOMContentLoaded', () => {
-  renderCatalog();
-  renderDemoModels();
-  initCameraControls();
-  initCompareSlider();
-  initDownloadButton();
-  initShareButton();
-  renderTryAnotherStrip();
-  initZoomEffect();
+// ========================================================
+// EVENT BINDINGS
+// ========================================================
+function bindAppEvents() {
+  // Stepper Clickable
+  el.stepIndicators.forEach((btn, idx) => {
+    btn.addEventListener("click", () => goToStep(idx + 1));
+  });
 
-  // Screen 3 Profile Back & Generate Buttons
-  const profileBackBtn = document.getElementById('profileBackBtn');
-  if (profileBackBtn) {
-    profileBackBtn.addEventListener('click', () => navigateToScreen('screen-catalog'));
-  }
-
-  const doTryOnBtn = document.getElementById('doTryOnBtn');
-  if (doTryOnBtn) {
-    doTryOnBtn.addEventListener('click', () => doTryOn());
-  }
-
-  // New Customer Session Button
-  const newCustomerBtn = document.getElementById('newCustomerBtn');
-  if (newCustomerBtn) {
-    newCustomerBtn.addEventListener('click', () => {
-      selectedSaree = null;
-      window.currentPersonBlob = null;
-      window.currentPersonUrl = '';
-      navigateToScreen('screen-catalog');
+  // Custom Garment Upload
+  if (el.customGarmentInput) {
+    el.customGarmentInput.addEventListener("change", (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleCustomGarmentUpload(e.target.files[0]);
+      }
     });
   }
 
-  // Set default initial view to Catalog (Screen 1)
-  navigateToScreen('screen-catalog');
-});
+  if (el.btnTryDetectedGarment) {
+    el.btnTryDetectedGarment.addEventListener("click", () => goToStep(2));
+  }
 
+  // Filter Tabs
+  el.filterTabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      el.filterTabs.forEach((t) => {
+        t.className = "filter-tab px-3 py-1.5 rounded-xl text-xs font-bold bg-white text-slate-600 hover:bg-slate-100 border border-slate-200";
+      });
+      tab.className = "filter-tab px-3 py-1.5 rounded-xl text-xs font-bold bg-orange-600 text-white shadow-sm";
+      state.activeFilter = tab.dataset.filter;
+      renderUniversalCatalog();
+    });
+  });
+
+  // Screen 2 Webcam Controls
+  if (el.btnStartCamera) el.btnStartCamera.addEventListener("click", startWebcam);
+  if (el.btnSnapPhoto) el.btnSnapPhoto.addEventListener("click", snapWebcamPhoto);
+  if (el.btnRetakeCamera) el.btnRetakeCamera.addEventListener("click", resetCameraView);
+  if (el.btnAcceptCamera) el.btnAcceptCamera.addEventListener("click", () => goToStep(3));
+  if (el.btnBackToScreen1) el.btnBackToScreen1.addEventListener("click", () => goToStep(1));
+
+  // Screen 3 Profile Controls
+  if (el.btnHeightMinus) el.btnHeightMinus.addEventListener("click", () => updateHeight(state.heightCm - 2));
+  if (el.btnHeightPlus) el.btnHeightPlus.addEventListener("click", () => updateHeight(state.heightCm + 2));
+  if (el.inputHeightCm) {
+    el.inputHeightCm.addEventListener("change", (e) => updateHeight(parseInt(e.target.value) || 170));
+  }
+  if (el.btnGenerateUniversalTryOn) {
+    el.btnGenerateUniversalTryOn.addEventListener("click", generateUniversalTryOn);
+  }
+  if (el.btnBackToScreen2) el.btnBackToScreen2.addEventListener("click", () => goToStep(2));
+
+  // Screen 4 Result Controls
+  if (el.compareSlider) {
+    el.compareSlider.addEventListener("input", (e) => updateSlider(e.target.value));
+  }
+  if (el.btnBackToCatalogFromResult) {
+    el.btnBackToCatalogFromResult.addEventListener("click", () => goToStep(1));
+  }
+  if (el.btnNewCustomerSession) {
+    el.btnNewCustomerSession.addEventListener("click", () => {
+      state.personBlob = null;
+      state.personDataUrl = null;
+      state.selectedDemoModel = null;
+      goToStep(1);
+    });
+  }
+}

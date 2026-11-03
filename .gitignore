@@ -65,3 +65,8 @@ frontend/public/assets/final_person_fitted_showcase.png
 backend/outputs/*.jpg
 backend/outputs/*.png
 backend/outputs/*.jpeg
+
+ai-tryon/backend/outputs/*
+!ai-tryon/backend/outputs/.gitkeep
+ai-tryon/backend/uploads/*
+!ai-tryon/backend/uploads/.gitkeep

@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>VirtualFit AI Studio — Saree Boutique Trial Kiosk</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            boutique: {
+              50: '#fffbeb',
+              100: '#fef3c7',
+              200: '#fde68a',
+              500: '#f59e0b',
+              600: '#d97706',
+              700: '#b45309',
+              800: '#92400e',
+              900: '#78350f',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[#faf8f5] text-gray-800 flex flex-col justify-between selection:bg-amber-100">
+
+  <!-- TOP KIOSK HEADER -->
+  <header class="bg-white/95 backdrop-blur-md border-b border-amber-100 sticky top-0 z-50 px-6 py-4 shadow-sm">
+    <div class="max-w-6xl mx-auto flex items-center justify-between">
+      
+      <!-- Brand Logo -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-white shadow-md shadow-amber-500/20 font-bold text-xl">
+          ✨
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="font-serif-luxury font-bold text-xl text-gray-900 tracking-tight">VirtualFit AI Studio</h1>
+            <span class="text-[11px] font-semibold uppercase tracking-wider bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">Saree Edition</span>
+          </div>
+          <p class="text-xs text-gray-400">Neural Draping & Virtual Trial Kiosk</p>
+        </div>
+      </div>
+
+      <!-- Kiosk Stepper Navigation -->
+      <nav class="hidden md:flex items-center gap-2">
+        <button id="step-nav-1" class="step-nav-btn flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500 text-white shadow-sm transition-all">
+          <span class="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">1</span>
+          <span>Catalog</span>
+        </button>
+        <span class="text-gray-300">›</span>
+        <button id="step-nav-2" class="step-nav-btn flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 text-gray-500 transition-all">
+          <span class="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-[10px]">2</span>
+          <span>Model / Photo</span>
+        </button>
+        <span class="text-gray-300">›</span>
+        <button id="step-nav-3" class="step-nav-btn flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 text-gray-500 transition-all">
+          <span class="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-[10px]">3</span>
+          <span>Fit Profile</span>
+        </button>
+        <span class="text-gray-300">›</span>
+        <button id="step-nav-4" class="step-nav-btn flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 text-gray-500 transition-all">
+          <span class="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-[10px]">4</span>
+          <span>AI Result</span>
+        </button>
+      </nav>
+
+      <!-- Backend Connection Status -->
+      <div class="flex items-center gap-2">
+        <span id="backend-status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+        <span id="backend-status-text" class="text-xs font-medium text-gray-500">Checking AI Server...</span>
+      </div>
+
+    </div>
+  </header>
+
+
+  <!-- MAIN CONTAINER (4 Screens) -->
+  <main class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6">
+
+    <!-- ========================================== -->
+    <!-- SCREEN 1: 12-SAREE CATALOG -->
+    <!-- ========================================== -->
+    <section id="screen-catalog" class="screen-view transition-opacity duration-300">
+      
+      <!-- Screen Header -->
+      <div class="text-center max-w-2xl mx-auto mb-8">
+        <span class="text-xs uppercase tracking-widest font-bold text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200/60 inline-block mb-2">Step 1 of 4 • Select Saree</span>
+        <h2 class="font-serif-luxury text-3xl sm:text-4xl font-bold text-gray-900 tracking-tight">Handcrafted Saree Collection</h2>
+        <p class="text-gray-500 text-sm mt-2">Tap any of our 12 handcrafted sarees to try on with a demo model or your live camera photo.</p>
+      </div>
+
+      <!-- Sarees Grid (12 Cards) -->
+      <div id="saree-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+        <!-- Dynamically rendered from SAREES constant -->
+      </div>
+
+      <!-- Bottom Sticky Action Bar -->
+      <div id="catalog-action-bar" class="hidden mt-8 p-4 bg-white rounded-2xl shadow-lg border border-amber-100 flex flex-col sm:flex-row items-center justify-between gap-4 sticky bottom-4 z-40">
+        <div class="flex items-center gap-4">
+          <img id="selected-saree-thumb" src="" alt="Selected saree" class="w-14 h-18 object-cover rounded-xl shadow-sm border border-gray-200">
+          <div>
+            <p class="text-xs uppercase font-bold text-amber-600">Selected Saree</p>
+            <h4 id="selected-saree-name" class="font-bold text-gray-900 text-base">Royal Sapphire Blue Banarasi</h4>
+            <p id="selected-saree-price" class="text-xs font-semibold text-amber-800">INR 2,499</p>
+          </div>
+        </div>
+        <button id="btn-catalog-continue" class="btn-primary w-full sm:w-auto px-8 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2">
+          <span>Continue to Model / Camera</span>
+          <span>➔</span>
+        </button>
+      </div>
+
+    </section>
+
+
+    <!-- ========================================== -->
+    <!-- SCREEN 2: DEMO MODELS OR CAMERA PHOTO -->
+    <!-- ========================================== -->
+    <section id="screen-capture" class="screen-view hidden transition-opacity duration-300">
+      
+      <div class="text-center max-w-xl mx-auto mb-6">
+        <span class="text-xs uppercase tracking-widest font-bold text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200/60 inline-block mb-2">Step 2 of 4 • Select Model or Take Photo</span>
+        <h2 class="font-serif-luxury text-3xl font-bold text-gray-900">Choose Who Wears It</h2>
+        <p class="text-gray-500 text-sm mt-1">Select a pre-calibrated demo model, or capture your own photo in good lighting.</p>
+      </div>
+
+      <!-- SECTION A: 4 DEMO MODELS HORIZONTAL CAROUSEL -->
+      <div class="bg-white rounded-3xl p-5 sm:p-6 shadow-md border border-amber-100 mb-8 max-w-3xl mx-auto">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <span class="text-xs font-bold uppercase tracking-wider text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-md border border-amber-200">Instant Preview</span>
+            <h3 class="font-bold text-gray-900 text-lg mt-1">Select a Demo Model</h3>
+          </div>
+          <span class="text-xs text-gray-400">Click any model to try instantly</span>
+        </div>
+
+        <div id="demo-models-row" class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+          <!-- Populated by app.js from DEMO_MODELS -->
+        </div>
+      </div>
+
+      <!-- OR DIVIDER -->
+      <div class="flex items-center justify-center max-w-md mx-auto my-6">
+        <div class="flex-1 border-t border-gray-300"></div>
+        <span class="px-4 text-xs uppercase font-bold text-gray-400 tracking-wider">OR Use Your Own Camera</span>
+        <div class="flex-1 border-t border-gray-300"></div>
+      </div>
+
+      <!-- SECTION B: WEBCAM CAPTURE -->
+      <div class="max-w-md mx-auto">
+        <div id="camera-box" class="relative bg-black rounded-3xl overflow-hidden shadow-2xl border-4 border-white aspect-[3/4] flex items-center justify-center">
+          
+          <!-- Live Video Stream -->
+          <video id="webcam-video" autoplay playsinline muted class="w-full h-full object-cover"></video>
+
+          <!-- Guide Overlay Silhouette & Message -->
+          <div id="camera-overlay" class="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-6">
+            <!-- Top Guide Pill -->
+            <div class="bg-black/60 backdrop-blur-md text-amber-300 text-xs font-medium px-4 py-1.5 rounded-full border border-amber-400/30 shadow-lg flex items-center gap-2 guide-pulse">
+              <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+              <span>Stand straight • Full body visible • Good light</span>
+            </div>
+
+            <!-- Silhouette Framing Guide -->
+            <div class="w-56 h-80 border-2 border-dashed border-amber-300/40 rounded-full flex items-center justify-center opacity-60">
+              <div class="w-24 h-28 border border-white/40 rounded-full -mt-24"></div>
+            </div>
+
+            <!-- Framing hint -->
+            <p class="text-[11px] text-white/80 bg-black/40 px-3 py-1 rounded-md">Align head at top, feet at bottom</p>
+          </div>
+
+          <!-- Captured Canvas Preview (Initially hidden) -->
+          <canvas id="capture-canvas" width="768" height="1024" class="hidden w-full h-full object-cover"></canvas>
+          <img id="capture-preview-img" class="hidden w-full h-full object-cover" alt="Captured Photo Preview">
+
+        </div>
+
+        <!-- Camera Controls -->
+        <div id="camera-live-controls" class="mt-6 flex items-center justify-center gap-6">
+          <button id="btn-switch-camera" class="w-12 h-12 rounded-full bg-white text-gray-700 shadow-md border border-gray-200 flex items-center justify-center hover:bg-gray-50 transition" title="Switch Camera">
+            🔄
+          </button>
+          
+          <!-- Shutter Button -->
+          <button id="btn-snap-photo" class="w-20 h-20 rounded-full bg-white border-4 border-amber-500 shadow-xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all" title="Take Photo">
+            <span class="w-14 h-14 rounded-full bg-gradient-to-tr from-amber-600 to-amber-400 shadow-inner block"></span>
+          </button>
+
+          <label for="file-upload-input" class="w-12 h-12 rounded-full bg-white text-gray-700 shadow-md border border-gray-200 flex items-center justify-center cursor-pointer hover:bg-gray-50 transition" title="Upload Photo">
+            📁
+          </label>
+          <input type="file" id="file-upload-input" accept="image/*" class="hidden">
+        </div>
+
+        <!-- Review Controls (Shown after snapping photo or picking demo model) -->
+        <div id="camera-review-controls" class="hidden mt-6 flex items-center justify-center gap-4">
+          <button id="btn-retake-photo" class="flex-1 py-3 px-5 rounded-xl font-semibold text-sm bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition">
+            🔄 Change / Retake
+          </button>
+          <button id="btn-accept-photo" class="flex-1 py-3 px-5 rounded-xl font-bold text-sm btn-primary">
+            Continue ➔
+          </button>
+        </div>
+
+        <!-- Navigation back button -->
+        <div class="text-center mt-6">
+          <button id="btn-back-to-catalog" class="text-xs text-gray-500 hover:text-gray-800 font-semibold underline underline-offset-4">
+            ← Back to Saree Catalog
+          </button>
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- ========================================== -->
+    <!-- SCREEN 3: PROFILE & HEIGHT -->
+    <!-- ========================================== -->
+    <section id="screen-profile" class="screen-view hidden transition-opacity duration-300">
+      
+      <div class="text-center max-w-xl mx-auto mb-8">
+        <span class="text-xs uppercase tracking-widest font-bold text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200/60 inline-block mb-2">Step 3 of 4 • Stature & Fit</span>
+        <h2 class="font-serif-luxury text-3xl font-bold text-gray-900">Confirm Fit Details</h2>
+        <p class="text-gray-500 text-sm mt-1">Set height to guide IDM-VTON neural draping and pallu length.</p>
+      </div>
+
+      <div class="max-w-xl mx-auto bg-white rounded-3xl p-6 sm:p-8 shadow-xl border border-amber-100/80">
+        
+        <!-- Paired Preview Cards -->
+        <div class="grid grid-cols-2 gap-4 mb-8">
+          
+          <!-- Selected Model / Photo Card -->
+          <div class="bg-gray-50 rounded-2xl p-3 border border-gray-200 text-center">
+            <span id="profile-person-label" class="text-[11px] font-bold uppercase tracking-wider text-gray-500 block mb-2">Selected Model</span>
+            <div class="aspect-[3/4] rounded-xl overflow-hidden shadow-inner bg-gray-200">
+              <img id="profile-person-thumb" src="" alt="Selected Person" class="w-full h-full object-cover">
+            </div>
+            <button id="btn-change-person-mini" class="text-[11px] font-semibold text-amber-700 hover:underline mt-2 inline-block">Change Model/Photo</button>
+          </div>
+
+          <!-- Garment Card -->
+          <div class="bg-amber-50/50 rounded-2xl p-3 border border-amber-200/60 text-center">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-amber-700 block mb-2">Selected Saree</span>
+            <div class="aspect-[3/4] rounded-xl overflow-hidden shadow-inner bg-amber-100">
+              <img id="profile-garment-thumb" src="" alt="Target Saree" class="w-full h-full object-cover">
+            </div>
+            <h4 id="profile-garment-name" class="font-bold text-xs text-gray-900 mt-2 truncate">Royal Banarasi Saree</h4>
+            <p id="profile-garment-price" class="text-[11px] font-semibold text-amber-700">INR 2,499</p>
+          </div>
+
+        </div>
+
+        <!-- Height Input Dial -->
+        <div class="bg-[#faf8f5] rounded-2xl p-5 border border-amber-100 mb-6">
+          <div class="flex items-center justify-between mb-2">
+            <label for="height-input" class="font-bold text-sm text-gray-800">Height (cm)</label>
+            <span id="height-feet-display" class="text-xs font-semibold text-amber-700">5 ft 7 in</span>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <button id="btn-height-minus" class="w-12 h-12 rounded-xl bg-white border border-gray-200 text-gray-800 font-bold text-xl hover:bg-gray-50 active:scale-95 shadow-sm">
+              -
+            </button>
+            <input type="number" id="height-input" value="170" min="130" max="220" class="flex-1 text-center font-bold text-2xl py-2.5 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white">
+            <button id="btn-height-plus" class="w-12 h-12 rounded-xl bg-white border border-gray-200 text-gray-800 font-bold text-xl hover:bg-gray-50 active:scale-95 shadow-sm">
+              +
+            </button>
+          </div>
+
+          <!-- Preset pills -->
+          <div class="flex items-center justify-center gap-2 mt-3">
+            <button class="btn-height-preset text-xs px-3 py-1 bg-white rounded-lg border border-gray-200 text-gray-600 hover:border-amber-400" data-height="155">155 cm (5'1")</button>
+            <button class="btn-height-preset text-xs px-3 py-1 bg-white rounded-lg border border-gray-200 text-gray-600 hover:border-amber-400" data-height="165">165 cm (5'5")</button>
+            <button class="btn-height-preset text-xs px-3 py-1 bg-white rounded-lg border border-amber-500 font-bold text-amber-800 bg-amber-50" data-height="170">170 cm (5'7")</button>
+            <button class="btn-height-preset text-xs px-3 py-1 bg-white rounded-lg border border-gray-200 text-gray-600 hover:border-amber-400" data-height="180">180 cm (5'11")</button>
+          </div>
+        </div>
+
+        <!-- Prompt preview -->
+        <div class="mb-8 text-xs text-gray-500 bg-gray-50 p-3 rounded-xl border border-gray-200 flex items-start gap-2">
+          <span class="text-amber-600 text-base">ℹ️</span>
+          <p id="profile-desc-preview">Using IDM-VTON neural diffusion with auto-segmentation and realistic crease synthesis.</p>
+        </div>
+
+        <!-- CTA Button -->
+        <button id="btn-generate-tryon" class="btn-primary w-full py-4 rounded-2xl font-bold text-base shadow-xl flex items-center justify-center gap-3">
+          <span>✨</span>
+          <span>Generate AI Try-On</span>
+          <span>➔</span>
+        </button>
+
+        <div class="text-center mt-4">
+          <button id="btn-back-to-capture" class="text-xs text-gray-400 hover:text-gray-700 font-medium">
+            ← Change Model or Retake Photo
+          </button>
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- ========================================== -->
+    <!-- SCREEN 4: RESULT & TRIAL ROOM -->
+    <!-- ========================================== -->
+    <section id="screen-result" class="screen-view hidden transition-opacity duration-300">
+      
+      <!-- 4A: LOADING STATE -->
+      <div id="result-loading-state" class="max-w-md mx-auto text-center py-12 px-6 bg-white rounded-3xl shadow-xl border border-amber-100">
+        
+        <!-- Big Spinner -->
+        <div class="relative w-28 h-28 mx-auto mb-6 flex items-center justify-center">
+          <div class="absolute inset-0 rounded-full border-4 border-amber-100"></div>
+          <div class="absolute inset-0 rounded-full border-4 border-amber-500 border-t-transparent spin-slow"></div>
+          <span class="text-3xl animate-bounce">🥻</span>
+        </div>
+
+        <h3 class="font-serif-luxury text-2xl font-bold text-gray-900 mb-2">AI is Draping Your Saree...</h3>
+        <p class="text-amber-800 font-semibold text-sm mb-4">Please wait 30–60 seconds</p>
+        
+        <!-- Dynamic Step Pill -->
+        <div class="bg-amber-50 rounded-full py-2 px-4 border border-amber-200 inline-block text-xs font-semibold text-amber-800 mb-4 animate-shimmer">
+          <span id="loading-step-msg">Analyzing posture & landmarks...</span>
+        </div>
+
+        <!-- Timer counter -->
+        <p class="text-xs text-gray-400">Elapsed time: <span id="loading-timer" class="font-mono font-bold text-gray-600">0s</span></p>
+
+        <p class="text-[11px] text-gray-400 mt-6">Powered by IDM-VTON on Private Hugging Face GPU</p>
+      </div>
+
+
+      <!-- 4B: SUCCESS RESULT VIEW -->
+      <div id="result-success-state" class="hidden max-w-4xl mx-auto">
+        
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <span class="text-xs uppercase tracking-widest font-bold text-green-700 bg-green-50 px-3 py-1 rounded-full border border-green-200 inline-block mb-1">
+              ✓ AI Fitting Complete
+            </span>
+            <h2 id="result-outfit-title" class="font-serif-luxury text-2xl sm:text-3xl font-bold text-gray-900">Your Fitted Saree</h2>
+          </div>
+
+          <!-- Download Action -->
+          <a id="btn-download-result" href="#" download="saree_tryon_result.jpg" class="bg-white text-gray-900 font-bold text-xs px-4 py-2.5 rounded-xl shadow-md border border-gray-200 flex items-center gap-2 hover:bg-gray-50 transition">
+            <span>📥</span>
+            <span>Download Photo</span>
+          </a>
+        </div>
+
+        <!-- Result Card Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+          
+          <!-- Large Try-On Result Image (Takes 2 columns) -->
+          <div class="md:col-span-2 bg-white rounded-3xl p-3 shadow-2xl border border-amber-100 overflow-hidden relative group">
+            <div class="aspect-[3/4] rounded-2xl overflow-hidden bg-gray-100 flex items-center justify-center">
+              <img id="result-main-image" src="" alt="AI Try-On Result" class="w-full h-full object-cover">
+            </div>
+          </div>
+
+          <!-- Outfit Details & Actions (1 column) -->
+          <div class="bg-white rounded-3xl p-6 shadow-xl border border-gray-200/80 flex flex-col justify-between h-full gap-6">
+            <div>
+              <div class="flex items-center gap-3 mb-4">
+                <img id="result-garment-thumb" src="" alt="Saree thumbnail" class="w-16 h-20 object-cover rounded-xl border border-gray-200 shadow-sm">
+                <div>
+                  <h4 id="result-garment-name-side" class="font-bold text-gray-900 text-base leading-tight">Royal Banarasi Saree</h4>
+                  <span id="result-garment-price-side" class="text-xs text-amber-700 font-bold">INR 2,499</span>
+                </div>
+              </div>
+
+              <div class="space-y-3 text-xs text-gray-600 bg-amber-50/50 p-4 rounded-2xl border border-amber-100">
+                <div class="flex justify-between border-b border-amber-100/60 pb-2">
+                  <span class="text-gray-500">Model Used</span>
+                  <span id="result-model-display" class="font-bold text-gray-800">Aisha (Demo)</span>
+                </div>
+                <div class="flex justify-between border-b border-amber-100/60 pb-2">
+                  <span class="text-gray-500">Height Matched</span>
+                  <span id="result-height-display" class="font-bold text-gray-800">170 cm</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-500">Draping Style</span>
+                  <span class="font-bold text-gray-800">Traditional Indian</span>
+                </div>
+              </div>
+
+              <p id="result-garment-desc-side" class="text-xs text-gray-500 mt-4 leading-relaxed">
+                IDM-VTON synthesized authentic pleats, pallu drape, and silk texture.
+              </p>
+            </div>
+
+            <div class="space-y-2 pt-4 border-t border-gray-100">
+              <button id="btn-back-to-catalog-from-result" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 py-3 rounded-xl font-semibold text-xs transition">
+                Browse Full Catalog
+              </button>
+              <button id="btn-change-model-from-result" class="w-full text-xs text-amber-700 hover:text-amber-900 font-semibold py-1">
+                Change Model / Photo
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- NEW STRIP: TRY ANOTHER SAREE ON SAME MODEL (12 Sarees) -->
+        <div class="mt-8 bg-white rounded-3xl p-5 shadow-lg border border-amber-100">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="font-bold text-gray-900 text-sm">Try Another Saree on Same Model</h3>
+              <p class="text-xs text-gray-400">Click any saree below to immediately generate on this same person</p>
+            </div>
+            <span class="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">12 Sarees</span>
+          </div>
+
+          <div id="quick-try-strip" class="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
+            <!-- Populated by app.js with 12 saree cards -->
+          </div>
+        </div>
+
+      </div>
+
+
+      <!-- 4C: ERROR STATE -->
+      <div id="result-error-state" class="hidden max-w-md mx-auto text-center py-10 px-6 bg-white rounded-3xl shadow-xl border border-red-100">
+        <div class="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-2xl mx-auto mb-4">
+          ⚠️
+        </div>
+        <h3 class="font-serif-luxury text-xl font-bold text-gray-900 mb-2">Try-On Generation Issue</h3>
+        <p id="error-message-text" class="text-xs text-red-600 bg-red-50 p-3 rounded-xl border border-red-200 mb-6 text-left break-words font-mono">
+          Could not connect to IDM-VTON model space.
+        </p>
+
+        <div class="space-y-3">
+          <button id="btn-retry-tryon" class="btn-primary w-full py-3 rounded-xl font-bold text-sm">
+            🔄 Retry Try-On (5s Cooldown)
+          </button>
+          <button id="btn-back-from-error" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold text-sm">
+            ← Change Model or Saree
+          </button>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+
+  <!-- FOOTER -->
+  <footer class="bg-white border-t border-gray-100 py-3 px-6 text-center text-xs text-gray-400">
+    <div class="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+      <p>© 2026 VirtualFit AI Studio • Store Kiosk Mode</p>
+      <div class="flex items-center gap-4">
+        <span>FastAPI Backend :8000</span>
+        <span>•</span>
+        <span>12 Luxury Sarees</span>
+        <span>•</span>
+        <span>4 Demo Models</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Application Script -->
+  <script src="app.js"></script>
+</body>
+</html>
