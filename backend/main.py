@@ -565,80 +565,88 @@ async def universal_tryon(
     final_prompt = generate_tryon_prompt(parsed_garment_data, body_data)
     logger.info(f"[STAGE 3: DYNAMIC PROMPT]\n{final_prompt}")
 
-    # Map category for IDM-VTON
-    # IDM-VTON supports: "upper_body", "lower_body", "dresses"
-    cat_raw = parsed_garment_data.get("category", "full_body")
-    idm_category = "dresses" if cat_raw == "full_body" else cat_raw
-    if idm_category not in ["upper_body", "lower_body", "dresses"]:
-        idm_category = "dresses"
-
-    # 6. Execute Try-On Pipeline with Retry Loop
-    delays = [5, 10, 15]
-    result = None
-    last_error = None
-
-    global hf_client, handle_file
-    if hf_client is None:
-        try:
-            from gradio_client import handle_file
-            hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
-            hf_client = get_gradio_client(hf_token)
-        except Exception as init_err:
-            logger.error(f"Failed to create Gradio Client: {init_err}")
-
-    if hf_client and handle_file:
-        for attempt, delay in enumerate(delays, start=1):
-            try:
-                logger.info(f"[IDM-VTON] Inference attempt {attempt}/3 (category={idm_category}, denoise=35)...")
-                result = hf_client.predict(
-                    dict={
-                        "background": handle_file(temp_person_path),
-                        "layers": [],
-                        "composite": None
-                    },
-                    garm_img=handle_file(temp_garment_path),
-                    garment_des=final_prompt,
-                    is_checked=True,
-                    is_checked_crop=True,
-                    denoise_steps=35,
-                    seed=42,
-                    api_name="/tryon"
-                )
-                if result:
-                    raw_out = result[0] if isinstance(result, (list, tuple)) else str(result)
-                    # -------------------------------------------------------
-                    # STAGE 4: SELF-CHECKING VALIDATOR LOOP
-                    # -------------------------------------------------------
-                    is_valid = validate_tryon_result(raw_out, parsed_garment_data)
-                    if is_valid:
-                        logger.info(f"[IDM-VTON] Succeeded and verified person wearing {parsed_garment_data.get('garment_type')}!")
-                        break
-                    else:
-                        logger.warning(f"[VALIDATOR RETRY] Attempt {attempt} returned non-human fabric. Retrying...")
-                        if attempt == len(delays):
-                            # Break and use enhanced composite to guarantee customer photo
-                            result = None
-                            break
-            except Exception as predict_err:
-                last_error = predict_err
-                logger.warning(f"[IDM-VTON] Attempt {attempt}/3 failed: {predict_err}. Waiting {delay}s...")
-                time.sleep(delay)
-
-    # 7. Apply Image Enhancement
+    # 6. Execute Try-On Pipeline
     enhanced_filename = f"enhanced_{cache_key}.jpg"
     enhanced_path = os.path.join(OUTPUTS_DIR, enhanced_filename)
+    result = None
 
+    g_type = parsed_garment_data.get("garment_type", "saree").lower()
+    is_ethnic = g_type in ['saree', 'sari', 'lehenga', 'gown', 'anarkali', 'salwar_kameez', 'kurta_set', 'kurta set'] or (parsed_garment_data.get("category") == "full_body" and any(k in g_type for k in ["saree", "lehenga", "kurta", "gown", "dress"]))
+
+    if is_ethnic:
+        logger.info(f"[ETHNIC PIPELINE] Garment type '{g_type}' detected. Bypassing IDM-VTON -> Executing Universal 3-Image Pipeline...")
+        from services.tryon_service import universal_tryon as run_universal_service, get_default_template_path
+        drape_tmpl = get_default_template_path()
+        out_file = run_universal_service(
+            customer_path=temp_person_path,
+            garment_path=temp_garment_path,
+            garment_type=g_type,
+            template_path=drape_tmpl,
+            output_path=enhanced_path,
+            retries=2
+        )
+        result = [out_file]
+    else:
+        # Western clothes (T-shirts, Shirts, Jackets, Pants)
+        cat_raw = parsed_garment_data.get("category", "upper_body")
+        idm_category = "upper_body" if cat_raw == "upper_body" else ("lower_body" if cat_raw == "lower_body" else "dresses")
+        delays = [5, 10, 15]
+        last_error = None
+
+        global hf_client, handle_file
+        if hf_client is None:
+            try:
+                from gradio_client import handle_file
+                hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
+                hf_client = get_gradio_client(hf_token)
+            except Exception as init_err:
+                logger.error(f"Failed to create Gradio Client: {init_err}")
+
+        if hf_client and handle_file:
+            for attempt, delay in enumerate(delays, start=1):
+                try:
+                    logger.info(f"[IDM-VTON] Inference attempt {attempt}/3 (category={idm_category}, denoise=35)...")
+                    result = hf_client.predict(
+                        dict={
+                            "background": handle_file(temp_person_path),
+                            "layers": [],
+                            "composite": None
+                        },
+                        garm_img=handle_file(temp_garment_path),
+                        garment_des=final_prompt,
+                        is_checked=True,
+                        is_checked_crop=True,
+                        denoise_steps=35,
+                        seed=42,
+                        api_name="/tryon"
+                    )
+                    if result:
+                        raw_out = result[0] if isinstance(result, (list, tuple)) else str(result)
+                        is_valid = validate_tryon_result(raw_out, parsed_garment_data)
+                        if is_valid:
+                            logger.info(f"[IDM-VTON] Succeeded and verified person wearing {parsed_garment_data.get('garment_type')}!")
+                            break
+                        else:
+                            logger.warning(f"[VALIDATOR RETRY] Attempt {attempt} returned non-human fabric. Retrying...")
+                            if attempt == len(delays):
+                                result = None
+                                break
+                except Exception as predict_err:
+                    last_error = predict_err
+                    logger.warning(f"[IDM-VTON] Attempt {attempt}/3 failed: {predict_err}. Waiting {delay}s...")
+                    time.sleep(delay)
+
+    # 7. Apply Image Enhancement
     if result:
         raw_output_path = result[0] if isinstance(result, (list, tuple)) else str(result)
-        logger.info(f"[ENHANCE] Enhancing result from {raw_output_path}...")
-        with Image.open(raw_output_path) as im:
-            im = im.convert("RGB")
-            im = ImageEnhance.Sharpness(im).enhance(1.3)
-            im = ImageEnhance.Contrast(im).enhance(1.05)
-            im.save(enhanced_path, "JPEG", quality=95)
+        if os.path.abspath(raw_output_path) != os.path.abspath(enhanced_path):
+            logger.info(f"[ENHANCE] Enhancing result from {raw_output_path}...")
+            with Image.open(raw_output_path) as im:
+                im = im.convert("RGB")
+                im = ImageEnhance.Sharpness(im).enhance(1.3)
+                im = ImageEnhance.Contrast(im).enhance(1.05)
+                im.save(enhanced_path, "JPEG", quality=95)
     else:
-        # High-Fidelity Universal Composite Fallback:
-        # Guarantees customer face & body are 100% preserved
         logger.warning(f"[UNIVERSAL COMPOSITE] Preserving customer face/body with natural overlay...")
         with Image.open(temp_person_path) as person_im, Image.open(temp_garment_path) as garment_im:
             person_im = person_im.convert("RGB")
