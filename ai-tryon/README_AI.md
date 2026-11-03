@@ -41,6 +41,17 @@ ai-tryon/
 
 ---
 
+## 🧠 Meta Muse Spark & Llama 4 Integration
+
+The VirtualFit AI Studio features an agentic multimodal try-on pipeline powered by Meta models at `https://api.llama.com/v1`:
+
+- **Muse Spark (Multimodal Reasoning)**: Evaluates complex product photos (flat-lays with extraneous shoes, watches, and hangers), isolates pure garments, and formulates strict wear instructions.
+- **Muse Spark (Agentic Planner)**: Orchestrates end-to-end tool calling (`analyze_garment` → `generate_tryon` → `validate_result` → `retry_with_correction`).
+- **Llama 4 Scout 17B (Fast Visual QA)**: Performs rapid visual QA verifying zero flat-lay photo borders and no visible denim jeans.
+- **Llama 4 Maverick 17B (Bespoke Stylist)**: Interactive chat advisor for Indian ethnic draping and western luxury styling.
+
+---
+
 ## 🚀 How to Run the Project
 
 ### Step 1: Start the FastAPI Backend

@@ -304,6 +304,32 @@ python scripts/test_tryon_pipeline.py
 
 ---
 
+## 🧠 Meta Muse Spark & Llama 4 Multimodal Agentic Pipeline
+
+To eliminate flat-lay photo pasting and ensure ethnic wear (Sarees, Bandhgalas, Lehengas) drape naturally to the ankles with zero jeans visible, the platform integrates **Meta Muse Spark** and **Meta Llama 4** models via `https://api.llama.com/v1`:
+
+### 1. Model Roles & Architecture
+
+| Stage | Service Module | Meta Model | Capability Leveraged |
+| :--- | :--- | :--- | :--- |
+| **1. Garment Analyzer** | `backend/services/meta_analyzer.py` | **Muse Spark** | Multimodal reasoning, isolates wearable components, ignores flat-lay props (shoes, watch, table), formulates draping rules. |
+| **2. Try-On Planner** | `backend/services/meta_planner.py` | **Muse Spark** | Autonomous agentic tool orchestration (`analyze` → `synthesize` → `validate` → `auto-retry`). |
+| **3. Visual QA Validator** | `backend/services/meta_validator.py` | **Llama 4 Scout 17B (Fast)** | Fast multimodal visual inspection verifying person is wearing outfit, zero jeans showing, and no rectangular flat-lay borders. |
+| **4. Bespoke Stylist** | `backend/services/meta_assistant.py` | **Llama 4 Maverick 17B** | Conversational bespoke fashion advisor providing pairing, accessorizing, and draping guidance. |
+
+### 2. Zero Flat-Lay & Zero Jeans Guarantee
+- **Extraneous Accessory Rejection:** Muse Spark inspects the product photo (e.g., flat-lay with shoes and watch), marks `components_to_ignore: ["shoes", "watch", "background"]`, and instructs the synthesis engine to only wear the jacket and trousers.
+- **Full-Body Lower-Garment Replacement:** When trying on full-body sets (`bandhgala_set`, `saree`), casual trousers and jeans are completely replaced down to the ankles.
+- **Llama 4 Scout Verification Gate:** Evaluates output images for flat-lay edge artifacts and denim blue HSV pixels before presenting the result to the user.
+
+### 3. Meta API Endpoints
+- **`POST /api/meta/analyze`**: Accepts customer and garment images, returns JSON reasoning with wear/ignore instructions.
+- **`POST /api/meta/tryon`**: Orchestrates end-to-end Muse Spark try-on pipeline with Llama 4 Scout verification.
+- **`POST /api/meta/validate`**: Submits result image for automated visual QA verdict (`PASS` / `FAIL`).
+- **`POST /api/meta/assistant`**: Interactive styling chat with Llama 4 Maverick.
+
+---
+
 ## 🔒 Security & Ephemeral Privacy
 
 All captured user stills, intermediate keypoint arrays, and segmentation masks are held temporarily in encrypted object storage (MinIO) with a **hard 15-minute TTL limit**. 

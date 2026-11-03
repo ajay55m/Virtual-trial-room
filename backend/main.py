@@ -7,6 +7,7 @@ import shutil
 import logging
 import re
 from typing import Optional, List, Dict, Any
+from pydantic import BaseModel
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -743,6 +744,90 @@ async def tryon_fast_endpoint(
     except Exception as e:
         logger.error(f"[TRYON FAST ERROR] {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ---------------------------------------------------------------------------
+# Meta Llama Model API Integrations (Muse Spark + Llama 4 Scout & Maverick)
+# ---------------------------------------------------------------------------
+@app.post("/api/meta/analyze")
+async def meta_analyze_endpoint(
+    customer_image: Optional[UploadFile] = File(None),
+    garment_image: Optional[UploadFile] = File(None),
+    filename: Optional[str] = Form("garment.jpg")
+):
+    """
+    Multimodal Garment Understanding powered by Meta Muse Spark.
+    Reasons about components to wear, accessories to ignore (shoes, watch), and draping rules.
+    """
+    c_bytes = await customer_image.read() if customer_image else b""
+    g_bytes = await garment_image.read() if garment_image else b""
+    if not g_bytes:
+        raise HTTPException(status_code=400, detail="Garment image is required.")
+
+    from services.meta_analyzer import analyze_garment_with_muse
+    result = analyze_garment_with_muse(c_bytes, g_bytes, filename=filename or "garment.jpg")
+    return {"status": "success", "analysis": result, "model": "Muse Spark"}
+
+@app.post("/api/meta/tryon")
+async def meta_tryon_planner_endpoint(
+    customer_image: Optional[UploadFile] = File(None),
+    garment_image: Optional[UploadFile] = File(None),
+    garment_id: Optional[str] = Form(None),
+    garment_type: Optional[str] = Form("bandhgala_set")
+):
+    """
+    Agentic Try-On Planner powered by Meta Muse Spark with Llama 4 Scout QA.
+    """
+    if not customer_image:
+        raise HTTPException(status_code=400, detail="Customer image is required.")
+    c_bytes = await customer_image.read()
+
+    g_bytes = b""
+    if garment_image:
+        g_bytes = await garment_image.read()
+    elif garment_id:
+        p = os.path.join(ROOT_DIR, "assets", "clothes", os.path.basename(garment_id))
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                g_bytes = f.read()
+
+    if not g_bytes:
+        raise HTTPException(status_code=400, detail="Garment image is required.")
+
+    from services.meta_planner import plan_and_execute_tryon
+    result = plan_and_execute_tryon(
+        customer_bytes=c_bytes,
+        garment_bytes=g_bytes,
+        garment_type=garment_type or "bandhgala_set",
+        output_dir=OUTPUTS_DIR
+    )
+    return result
+
+@app.post("/api/meta/validate")
+async def meta_validate_endpoint(
+    result_image: UploadFile = File(...),
+    garment_type: Optional[str] = Form("bandhgala_set")
+):
+    """
+    Multimodal Visual QA powered by Llama 4 Scout 17B (Fast).
+    Checks for flat-lay paste, visible jeans, and draping length.
+    """
+    r_bytes = await result_image.read()
+    from services.meta_validator import validate_with_llama_scout
+    report = validate_with_llama_scout(r_bytes, garment_type=garment_type or "bandhgala_set")
+    return {"status": "success", "report": report, "model": "Llama-4-Scout-17B-16E-Instruct-FP8"}
+
+class AssistantChatRequest(BaseModel):
+    messages: List[Dict[str, Any]]
+    garment_id: Optional[str] = None
+
+@app.post("/api/meta/assistant")
+async def meta_assistant_endpoint(req: AssistantChatRequest):
+    """
+    Bespoke Fashion Styling Assistant powered by Meta Llama 4 Maverick 17B.
+    """
+    from services.meta_assistant import chat_with_maverick_stylist
+    reply = chat_with_maverick_stylist(req.messages)
+    return {"status": "success", "reply": reply, "model": "Llama-4-Maverick-17B-128E-Instruct-FP8"}
 
 if __name__ == "__main__":
     import uvicorn
