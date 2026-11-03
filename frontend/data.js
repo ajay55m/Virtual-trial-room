@@ -101,18 +101,19 @@ const UNIVERSAL_GARMENTS = [
   },
   {
     id: "garment-05",
-    name: "Men's Royal Silk Bandhgala Jodhpuri Kurta",
-    type: "kurta",
+    name: "Men's Royal Silk Bandhgala Suit Set",
+    type: "bandhgala_set",
+    garment_type: "bandhgala_set",
     category: "full_body",
     gender: "male",
     price: "INR 3,499",
     priceNumber: 3499,
     img: "assets/clothes/kurta-01-men.jpg",
-    color: "#312e81",
+    color: "#1e1b4b",
     pattern: "brocade textured",
-    wearing_instructions: "Wear Mandarin collar jacket over torso down to hips with matching trousers",
-    garment_desc: "a royal Indian men's bandhgala jodhpuri silk jacket with gold buttons",
-    badge: "Ethnic"
+    wearing_instructions: "Wear black tailored bandhgala jacket buttoned up over torso with matching black formal trousers falling straight to ankles. Jeans must be completely removed.",
+    garment_desc: "a royal Indian men's bandhgala jodhpuri silk jacket with matching black trousers, full body suit, remove jeans completely",
+    badge: "Bespoke"
   },
   {
     id: "garment-06",

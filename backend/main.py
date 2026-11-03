@@ -147,7 +147,13 @@ def analyze_garment_locally(image_bytes: bytes, filename: str = "") -> dict:
         target_gender = "unisex"
         components = ["pant"]
         wearing_instructions = "Wear from natural waistline down to ankles"
-    elif any(k in fn for k in ["kurta", "bandhgala", "sherwani", "chanderi"]):
+    elif any(k in fn for k in ["bandhgala", "jodhpuri", "kurta-01"]):
+        garment_type = "bandhgala_set"
+        category = "full_body"
+        target_gender = "male"
+        components = ["bandhgala jacket", "matching trousers"]
+        wearing_instructions = "Wear black tailored bandhgala jacket buttoned up over torso with matching black formal trousers falling straight to ankles. Jeans must be completely removed."
+    elif any(k in fn for k in ["kurta", "sherwani", "chanderi"]):
         garment_type = "kurta"
         category = "full_body"
         target_gender = "male" if any(k in fn for k in ["men", "man"]) else "female"
@@ -565,34 +571,39 @@ async def universal_tryon(
     final_prompt = generate_tryon_prompt(parsed_garment_data, body_data)
     logger.info(f"[STAGE 3: DYNAMIC PROMPT]\n{final_prompt}")
 
-    # 6. Execute Try-On Pipeline
+    # 6. Execute 1-Call Fast Try-On Pipeline (No IDM-VTON for ethnic/full-body, No PIL Paste Fallback)
     enhanced_filename = f"enhanced_{cache_key}.jpg"
     enhanced_path = os.path.join(OUTPUTS_DIR, enhanced_filename)
     result = None
 
-    g_type = parsed_garment_data.get("garment_type", "saree").lower()
-    is_ethnic = g_type in ['saree', 'sari', 'lehenga', 'gown', 'anarkali', 'salwar_kameez', 'kurta_set', 'kurta set'] or (parsed_garment_data.get("category") == "full_body" and any(k in g_type for k in ["saree", "lehenga", "kurta", "gown", "dress"]))
+    g_type = parsed_garment_data.get("garment_type", "bandhgala_set").lower()
+    is_full_body = (
+        g_type in ['bandhgala_set', 'bandhgala', 'saree', 'sari', 'lehenga', 'gown', 'anarkali', 'salwar_kameez', 'kurta_set', 'kurta', 'dress'] 
+        or parsed_garment_data.get("category") == "full_body"
+    )
 
-    if is_ethnic:
-        logger.info(f"[ETHNIC PIPELINE] Garment type '{g_type}' detected. Bypassing IDM-VTON -> Executing Universal 3-Image Pipeline...")
-        from services.tryon_service import universal_tryon as run_universal_service, get_default_template_path
-        drape_tmpl = get_default_template_path()
-        out_file = run_universal_service(
-            customer_path=temp_person_path,
-            garment_path=temp_garment_path,
-            garment_type=g_type,
-            template_path=drape_tmpl,
-            output_path=enhanced_path,
-            retries=2
-        )
-        result = [out_file]
+    if is_full_body:
+        logger.info(f"[FAST PIPELINE] Garment type '{g_type}' detected. Bypassing IDM-VTON -> Executing 1-Call Gemini Engine...")
+        from services.fast_tryon import fast_tryon as run_fast_service
+        try:
+            _, out_file, _ = run_fast_service(
+                customer_bytes=person_bytes,
+                garment_bytes=garment_bytes,
+                garment_type=g_type,
+                output_dir=OUTPUTS_DIR
+            )
+            if out_file and os.path.exists(out_file):
+                import shutil
+                shutil.copy2(out_file, enhanced_path)
+                result = [enhanced_path]
+        except Exception as fast_err:
+            logger.error(f"[FAST TRYON ERROR] {fast_err}")
+            result = None
     else:
-        # Western clothes (T-shirts, Shirts, Jackets, Pants)
+        # Western Separates (T-shirts, Shirts, Jackets, Pants)
         cat_raw = parsed_garment_data.get("category", "upper_body")
         idm_category = "upper_body" if cat_raw == "upper_body" else ("lower_body" if cat_raw == "lower_body" else "dresses")
-        delays = [5, 10, 15]
-        last_error = None
-
+        delays = [5, 10]
         global hf_client, handle_file
         if hf_client is None:
             try:
@@ -605,13 +616,9 @@ async def universal_tryon(
         if hf_client and handle_file:
             for attempt, delay in enumerate(delays, start=1):
                 try:
-                    logger.info(f"[IDM-VTON] Inference attempt {attempt}/3 (category={idm_category}, denoise=35)...")
-                    result = hf_client.predict(
-                        dict={
-                            "background": handle_file(temp_person_path),
-                            "layers": [],
-                            "composite": None
-                        },
+                    logger.info(f"[IDM-VTON] Attempt {attempt}/2 for {g_type}...")
+                    res = hf_client.predict(
+                        dict={"background": handle_file(temp_person_path), "layers": [], "composite": None},
                         garm_img=handle_file(temp_garment_path),
                         garment_des=final_prompt,
                         is_checked=True,
@@ -620,73 +627,30 @@ async def universal_tryon(
                         seed=42,
                         api_name="/tryon"
                     )
-                    if result:
-                        raw_out = result[0] if isinstance(result, (list, tuple)) else str(result)
-                        is_valid = validate_tryon_result(raw_out, parsed_garment_data)
-                        if is_valid:
-                            logger.info(f"[IDM-VTON] Succeeded and verified person wearing {parsed_garment_data.get('garment_type')}!")
+                    if res:
+                        raw_out = res[0] if isinstance(res, (list, tuple)) else str(res)
+                        if validate_tryon_result(raw_out, parsed_garment_data):
+                            result = [raw_out]
                             break
-                        else:
-                            logger.warning(f"[VALIDATOR RETRY] Attempt {attempt} returned non-human fabric. Retrying...")
-                            if attempt == len(delays):
-                                result = None
-                                break
                 except Exception as predict_err:
-                    last_error = predict_err
-                    logger.warning(f"[IDM-VTON] Attempt {attempt}/3 failed: {predict_err}. Waiting {delay}s...")
+                    logger.warning(f"[IDM-VTON] Error: {predict_err}")
                     time.sleep(delay)
 
-    # 7. Apply Image Enhancement
+    # 7. Final Validation & Strictly Reject Fallback Paste
     if result:
         raw_output_path = result[0] if isinstance(result, (list, tuple)) else str(result)
         if os.path.abspath(raw_output_path) != os.path.abspath(enhanced_path):
-            logger.info(f"[ENHANCE] Enhancing result from {raw_output_path}...")
             with Image.open(raw_output_path) as im:
                 im = im.convert("RGB")
-                im = ImageEnhance.Sharpness(im).enhance(1.3)
+                im = ImageEnhance.Sharpness(im).enhance(1.25)
                 im = ImageEnhance.Contrast(im).enhance(1.05)
                 im.save(enhanced_path, "JPEG", quality=95)
     else:
-        logger.warning(f"[UNIVERSAL COMPOSITE] Preserving customer face/body with natural overlay...")
-        with Image.open(temp_person_path) as person_im, Image.open(temp_garment_path) as garment_im:
-            person_im = person_im.convert("RGB")
-            pw, ph = person_im.size
-            
-            # Category-aware placement
-            cat = parsed_garment_data.get("category", "full_body")
-            garment_im = garment_im.convert("RGBA")
-            
-            combined = person_im.copy().convert("RGBA")
-            
-            if cat == "upper_body":
-                # Scale to torso (35% to 75% height)
-                gw = int(pw * 0.75)
-                gh = int(ph * 0.42)
-                g_resized = garment_im.resize((gw, gh), Image.Resampling.LANCZOS)
-                gx = (pw - gw) // 2
-                gy = int(ph * 0.32)
-                combined.paste(g_resized, (gx, gy), g_resized)
-            elif cat == "lower_body":
-                # Scale to lower body (60% to 95% height)
-                gw = int(pw * 0.65)
-                gh = int(ph * 0.45)
-                g_resized = garment_im.resize((gw, gh), Image.Resampling.LANCZOS)
-                gx = (pw - gw) // 2
-                gy = int(ph * 0.55)
-                combined.paste(g_resized, (gx, gy), g_resized)
-            else:
-                # Full body / dress / kurta / saree
-                gw = int(pw * 0.85)
-                gh = int(ph * 0.68)
-                g_resized = garment_im.resize((gw, gh), Image.Resampling.LANCZOS)
-                gx = (pw - gw) // 2
-                gy = int(ph * 0.30)
-                combined.paste(g_resized, (gx, gy), g_resized)
-
-            final_rgb = combined.convert("RGB")
-            final_rgb = ImageEnhance.Sharpness(final_rgb).enhance(1.3)
-            final_rgb = ImageEnhance.Contrast(final_rgb).enhance(1.05)
-            final_rgb.save(enhanced_path, "JPEG", quality=95)
+        logger.error(f"[FATAL TRYON FAILURE] Failed to generate valid fit for {g_type}. Rejecting raw product fallback.")
+        raise HTTPException(
+            status_code=500,
+            detail="AI Try-On failed to generate a photorealistic fit. The system rejected raw product fallback. Please try again."
+        )
 
     result_url = f"/outputs/{enhanced_filename}"
 
@@ -729,6 +693,56 @@ def serve_data_js():
 @app.get("/app.js")
 def serve_app_js():
     return FileResponse(os.path.join(ROOT_DIR, "frontend", "app.js"), media_type="application/javascript")
+
+
+@app.post("/api/tryon-fast")
+@app.post("/tryon-fast")
+async def tryon_fast_endpoint(
+    customer_image: Optional[UploadFile] = File(None),
+    person: Optional[UploadFile] = File(None),
+    person_image: Optional[UploadFile] = File(None),
+    garment_image: Optional[UploadFile] = File(None),
+    garment: Optional[UploadFile] = File(None),
+    garment_id: Optional[str] = Form(None),
+    garment_type: Optional[str] = Form("bandhgala_set")
+):
+    """
+    Ultra-Fast 1-Call Try-On Endpoint (Direct Gemini / Precision Engine).
+    Skips separate analyze and standardize calls.
+    """
+    t0 = time.time()
+    person_upload = customer_image or person or person_image
+    if not person_upload:
+        raise HTTPException(status_code=400, detail="Customer image is required.")
+    p_bytes = await person_upload.read()
+
+    g_bytes = b""
+    g_upload = garment_image or garment
+    if g_upload:
+        g_bytes = await g_upload.read()
+    elif garment_id:
+        p = os.path.join(ROOT_DIR, "assets", "clothes", os.path.basename(garment_id))
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                g_bytes = f.read()
+
+    if not g_bytes:
+        raise HTTPException(status_code=400, detail="Garment image is required.")
+
+    from services.fast_tryon import fast_tryon
+    try:
+        _, out_path, is_cached = fast_tryon(p_bytes, g_bytes, garment_type, OUTPUTS_DIR)
+        rel_url = f"/outputs/{os.path.basename(out_path)}"
+        return {
+            "status": "completed",
+            "result_url": rel_url,
+            "cached": is_cached,
+            "elapsed_ms": int((time.time() - t0) * 1000),
+            "garment_type": garment_type
+        }
+    except Exception as e:
+        logger.error(f"[TRYON FAST ERROR] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

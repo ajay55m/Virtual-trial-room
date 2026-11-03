@@ -80,6 +80,10 @@ const el = {
 
   // Screen 4: Result & Before/After Slider
   resultLoadingBox: document.getElementById("resultLoadingBox"),
+  resultErrorBox: document.getElementById("resultErrorBox"),
+  resultErrorMessage: document.getElementById("resultErrorMessage"),
+  btnRetryTryOn: document.getElementById("btnRetryTryOn"),
+  loadingProgressBar: document.getElementById("loadingProgressBar"),
   resultSuccessBox: document.getElementById("resultSuccessBox"),
   loadingStepStatus: document.getElementById("loadingStepStatus"),
   loadingElapsedTimer: document.getElementById("loadingElapsedTimer"),

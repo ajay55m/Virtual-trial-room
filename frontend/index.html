@@ -342,19 +342,40 @@
     <!-- ======================================================== -->
     <section id="screen4" class="hidden transition-all duration-300">
       
-      <!-- Loading State -->
-      <div id="resultLoadingBox" class="max-w-md mx-auto text-center py-16 bg-white rounded-3xl p-8 border border-orange-100 shadow-sm">
-        <div class="relative w-24 h-24 mx-auto mb-6 flex items-center justify-center">
+      <!-- Loading State with Progress Steps -->
+      <div id="resultLoadingBox" class="max-w-md mx-auto text-center py-12 bg-white rounded-3xl p-8 border border-orange-100 shadow-md">
+        <div class="relative w-20 h-20 mx-auto mb-4 flex items-center justify-center">
           <div class="absolute inset-0 rounded-full border-4 border-orange-100"></div>
           <div class="absolute inset-0 rounded-full border-4 border-orange-600 border-t-transparent animate-spin"></div>
-          <span class="text-3xl animate-bounce">✨</span>
+          <span class="text-2xl animate-bounce">✨</span>
         </div>
-        <h3 class="font-serif-title text-2xl font-bold text-slate-900 mb-1">Universal AI is Dressing Customer...</h3>
-        <p class="text-xs font-semibold text-orange-600 mb-4">Please wait 25–45 seconds</p>
-        <span id="loadingStepStatus" class="inline-block text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-full">
-          Standardizing fabric & mapping body contours...
+        <h3 class="font-serif-title text-xl font-bold text-slate-900 mb-1">Dressing Customer with AI...</h3>
+        <p class="text-xs text-slate-500 mb-5">Single-Call Precision Try-On (10–15s)</p>
+
+        <!-- Progress Steps -->
+        <div class="w-full bg-slate-100 rounded-full h-2 mb-3 overflow-hidden">
+          <div id="loadingProgressBar" class="bg-orange-600 h-2 rounded-full transition-all duration-500" style="width: 35%;"></div>
+        </div>
+
+        <span id="loadingStepStatus" class="inline-block text-xs font-bold text-slate-700 bg-orange-50 px-3 py-1 rounded-full border border-orange-200">
+          Step 1: Uploading & compressing photo...
         </span>
         <p class="text-xs text-slate-400 mt-4">Elapsed: <span id="loadingElapsedTimer" class="font-bold text-slate-600">0s</span></p>
+      </div>
+
+      <!-- Error State with Retry Button (Never show raw product on failure) -->
+      <div id="resultErrorBox" class="hidden max-w-md mx-auto text-center py-12 bg-white rounded-3xl p-8 border border-red-200 shadow-md">
+        <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-red-50 text-red-600 flex items-center justify-center text-3xl">
+          ⚠️
+        </div>
+        <h3 class="font-serif-title text-xl font-bold text-slate-900 mb-2">Generation Incomplete</h3>
+        <p id="resultErrorMessage" class="text-xs text-slate-600 mb-6 leading-relaxed">
+          AI rejected raw flat-lay paste. Re-running with strict garment synthesis...
+        </p>
+        <button id="btnRetryTryOn" type="button" class="w-full py-3.5 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-2xl shadow-lg transition flex items-center justify-center gap-2">
+          <span>🔄</span>
+          <span>Retry AI Try-On</span>
+        </button>
       </div>
 
       <!-- Success Result View -->
