@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Dict, Any, Optional, Tuple
 from services.meta_client import call_meta_chat, bytes_to_data_url, is_meta_configured, META_MODEL_REASONING
-from services.meta_analyzer import analyze_garment_with_muse
+from services.meta_analyzer import analyze_garment_with_muse, get_execution_plan
 from services.meta_validator import validate_with_llama_scout
 from services.fast_tryon import fast_tryon
 
@@ -14,12 +14,12 @@ PLANNER_TOOLS = [
         "type": "function",
         "function": {
             "name": "analyze_garment",
-            "description": "Analyze reference garment and customer photo to extract components to wear, components to ignore (shoes, watch, flat-lay background), and wearing instructions.",
+            "description": "Analyze reference garment and customer photo to extract components to wear, components to ignore (shoes, watch, flat-lay background), execution plan, and wearing instructions.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "garment_type": {"type": "string", "description": "Detected type: bandhgala_set, saree, lehenga, gown, jacket, etc."},
-                    "category": {"type": "string", "enum": ["upper_body", "lower_body", "full_body"]}
+                    "category": {"type": "string", "enum": ["tops", "bottoms", "one-pieces", "full_body"]}
                 },
                 "required": ["garment_type", "category"]
             }
@@ -29,7 +29,7 @@ PLANNER_TOOLS = [
         "type": "function",
         "function": {
             "name": "generate_tryon",
-            "description": "Invoke image try-on engine using Muse-synthesized prompt and wearing instructions.",
+            "description": "Invoke image try-on engine using 2-pass sequence for sets or single-pass for separates.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -74,8 +74,8 @@ PLANNER_TOOLS = [
 
 PLANNER_SYSTEM_PROMPT = """You are Muse Spark, Meta's autonomous Try-On Planner for VirtualFit AI Studio.
 You orchestrate the complete virtual trial room pipeline via agentic tool calling:
-1. Tool analyze_garment: Understand how this specific outfit is worn, and which flat-lay accessories (watch, shoes, background) to ignore.
-2. Tool generate_tryon: Call the image try-on engine with your detailed tailored prompt.
+1. Tool analyze_garment: Understand how this specific outfit is worn, execution plan (2-pass tops->bottoms for suit sets), and which flat-lay accessories (watch, shoes, background) to ignore.
+2. Tool generate_tryon: Call the image try-on engine with 2-pass execution plan.
 3. Tool validate_result: Check the output to ensure the customer is genuinely wearing the clothes and no jeans remain.
 4. Tool retry_with_correction: If jeans or flat-lay paste are detected, trigger an auto-retry with strict corrective instructions.
 
@@ -92,16 +92,18 @@ def plan_and_execute_tryon(
     """
     Agentic Try-On Planner:
     Autonomous pipeline powered by Meta Muse Spark reasoning + Llama 4 Scout visual validation.
-    Flow: Muse analyzes -> invokes generate_tryon -> validates with Scout -> auto-retries if needed.
+    Flow: Muse analyzes -> invokes 2-pass or 1-pass execution plan -> validates with Scout -> auto-retries if needed.
     """
     logger.info(f"[MUSE SPARK PLANNER] Beginning autonomous pipeline for '{garment_type}'...")
 
     # Step 1: Multimodal Garment Understanding with Muse Spark
     analysis = analyze_garment_with_muse(customer_bytes, garment_bytes, filename)
     detected_type = analysis.get("garment_type", garment_type)
-    muse_prompt = analysis.get("tryon_prompt", "")
+    plan = analysis.get("execution_plan") or get_execution_plan(detected_type)
+    if plan.get("mode") == "two_pass":
+        logger.info(f"[MUSE SPARK PLANNER] 2-Pass Plan detected for '{detected_type}' ({plan.get('parts')})")
 
-    # Step 2: Try-On Synthesis with Muse-crafted Prompt
+    # Step 2: Try-On Synthesis with 2-Pass Pipeline for Sets
     result_bytes, out_path, is_cached = fast_tryon(
         customer_bytes=customer_bytes,
         garment_bytes=garment_bytes,
@@ -123,7 +125,6 @@ def plan_and_execute_tryon(
     )
     if needs_retry:
         logger.warning(f"[MUSE SPARK RE-PLANNING] Scout rejected attempt: {val_report}. Triggering tool 'retry_with_correction'...")
-        correction = "Previous attempt FAILED: do NOT paste flat-lay photo, remove all jeans/pants completely, dress customer in tailored outfit down to ankles."
         
         # Re-execute with correction directive
         result_bytes, out_path, _ = fast_tryon(
@@ -155,4 +156,3 @@ def plan_and_execute_tryon(
         "validation_report": val_report,
         "orchestrated_by": "Meta Muse Spark + Llama 4 Scout"
     }
-

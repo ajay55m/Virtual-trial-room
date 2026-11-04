@@ -200,9 +200,17 @@ function renderUniversalCatalog() {
   });
 }
 
+function invalidatePersonMaskCache() {
+  fetch(`${API_BASE}/api/invalidate-mask-cache`, {
+    method: "POST",
+    body: new URLSearchParams({ person_id: state.selectedModel ? `model-${state.selectedModel.id}` : "custom" })
+  }).catch((e) => console.warn("Mask cache invalidation warning:", e));
+}
+
 function selectGarment(garment, advanceToStep2 = true) {
   state.selectedGarment = garment;
   state.uploadedGarmentData = null;
+  invalidatePersonMaskCache();
 
   // Update Review Card in Step 3
   if (el.reviewGarmentThumb) el.reviewGarmentThumb.src = garment.img;
@@ -521,8 +529,11 @@ async function generateUniversalTryOn() {
     const garmentDataObj = state.uploadedGarmentData || {
       garment_type: state.selectedGarment.type,
       category: state.selectedGarment.category,
+      is_set: Boolean(state.selectedGarment.is_set),
+      parts: state.selectedGarment.parts || [state.selectedGarment.category],
+      execution_plan: state.selectedGarment.execution_plan || null,
       target_gender: state.selectedGarment.gender,
-      components: [state.selectedGarment.type],
+      components: state.selectedGarment.parts || [state.selectedGarment.type],
       primary_color: state.selectedGarment.color || "black",
       pattern: state.selectedGarment.pattern || "plain",
       wearing_instructions: state.selectedGarment.wearing_instructions
@@ -589,7 +600,8 @@ function showTryOnSuccess(resultUrl) {
   el.resultGarmentNameSide.textContent = garment.name;
   el.resultGarmentPriceSide.textContent = garment.price;
   el.resultTypeDisplay.textContent = garment.type.toUpperCase();
-  el.resultCategoryDisplay.textContent = garment.category.replace('_', ' ').toUpperCase();
+  const displayCat = garment.is_set ? "Full Suit Set (2-Pass)" : garment.category.replace('_', ' ').toUpperCase();
+  el.resultCategoryDisplay.textContent = displayCat;
   el.resultDescSide.textContent = garment.wearing_instructions || "Custom fit adapted to stature.";
 
   // Render bottom quick try strip

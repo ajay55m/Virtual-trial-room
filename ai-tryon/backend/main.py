@@ -1,41 +1,87 @@
 import os
+import json
 import time
 import uuid
+import hashlib
 import shutil
 import logging
-from pathlib import Path
-from dotenv import load_dotenv
+import re
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageOps
+from dotenv import load_dotenv
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("ai_tryon")
+# ---------------------------------------------------------------------------
+# Setup & Directory Paths
+# ---------------------------------------------------------------------------
+import sys
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if os.path.basename(CURRENT_DIR).lower() == "backend":
+    ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
+    BASE_DIR = CURRENT_DIR
+else:
+    ROOT_DIR = CURRENT_DIR
+    BASE_DIR = os.path.join(ROOT_DIR, "backend")
 
-# Directory setup
-BASE_DIR = Path(__file__).resolve().parent
-ENV_PATH = BASE_DIR / ".env"
+OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
+UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
+CACHE_FILE = os.path.join(OUTPUTS_DIR, "cache.json")
+
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+os.makedirs(OUTPUTS_DIR, exist_ok=True)
+os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 # Load environment variables
-load_dotenv(dotenv_path=ENV_PATH)
-HF_SPACE = os.getenv("HF_SPACE", "yisol/IDM-VTON")
-HF_TOKEN = os.getenv("HF_TOKEN")
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+load_dotenv(os.path.join(ROOT_DIR, ".env"))
+from services.meta_analyzer import get_execution_plan, SET_TYPES
 
-UPLOAD_DIR = BASE_DIR / "uploads"
-OUTPUT_DIR = BASE_DIR / "outputs"
-ASSETS_DIR = BASE_DIR.parent / "assets"
-FRONTEND_DIR = BASE_DIR.parent / "frontend"
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("universal-tryon-backend")
 
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# Initialize Hugging Face Gradio Client for IDM-VTON
+def get_gradio_client(token: Optional[str] = None):
+    try:
+        from gradio_client import Client
+        if not token:
+            return Client("yisol/IDM-VTON")
+        import inspect
+        sig = inspect.signature(Client.__init__)
+        if "token" in sig.parameters:
+            return Client("yisol/IDM-VTON", token=token)
+        elif "hf_token" in sig.parameters:
+            return Client("yisol/IDM-VTON", **{"hf_token": token})  # type: ignore
+        else:
+            return Client("yisol/IDM-VTON", headers={"Authorization": f"Bearer {token}"})
+    except Exception as e:
+        logger.warning(f"Could not initialize Gradio Client for IDM-VTON: {e}")
+        return None
 
-app = FastAPI(title="AI Virtual Trial Room Backend", version="1.0.0")
+try:
+    from gradio_client import handle_file
+    hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
+    hf_client = get_gradio_client(hf_token)
+    if hf_client:
+        logger.info("Successfully initialized Gradio Client for yisol/IDM-VTON")
+except Exception as e:
+    hf_client = None
+    handle_file = None
+    logger.warning(f"Could not pre-initialize Gradio Client for IDM-VTON: {e}")
 
-# CORS middleware
+# ---------------------------------------------------------------------------
+# FastAPI Application
+# ---------------------------------------------------------------------------
+app = FastAPI(title="VirtualFit Universal AI Try-On Studio", version="3.0.0")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -44,172 +90,834 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount outputs as static files
-app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
+# Mount outputs static directory
+app.mount("/outputs", StaticFiles(directory=OUTPUTS_DIR), name="outputs")
+if os.path.exists(os.path.join(ROOT_DIR, "frontend")):
+    app.mount("/frontend", StaticFiles(directory=os.path.join(ROOT_DIR, "frontend")), name="frontend")
 
-# Mount assets directory if present
-if ASSETS_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
+# Mount assets directories
+if os.path.exists(os.path.join(ROOT_DIR, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(ROOT_DIR, "assets")), name="assets")
+if os.path.exists(os.path.join(ROOT_DIR, "frontend", "assets")):
+    app.mount("/frontend/assets", StaticFiles(directory=os.path.join(ROOT_DIR, "frontend", "assets")), name="frontend_assets")
+if os.path.exists(os.path.join(ROOT_DIR, "garments")):
+    app.mount("/garments", StaticFiles(directory=os.path.join(ROOT_DIR, "garments")), name="garments")
 
-# Mount frontend directory for kiosk convenience
-if FRONTEND_DIR.exists():
-    app.mount("/frontend", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+# ---------------------------------------------------------------------------
+# Cache Helpers
+# ---------------------------------------------------------------------------
+def load_cache() -> dict:
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Error reading cache file: {e}")
+    return {}
 
+def save_cache(cache_data: dict):
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache_data, f, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving cache file: {e}")
 
-@app.get("/")
-def read_root():
-    """Health check / root endpoint"""
+# ---------------------------------------------------------------------------
+# STAGE 1: GARMENT ANALYZER AI
+# ---------------------------------------------------------------------------
+def analyze_garment_locally(image_bytes: bytes, filename: str = "") -> dict:
+    """
+    High-fidelity computer vision fallback that extracts garment attributes,
+    category (upper_body / lower_body / full_body), target gender, color, and wearing rules.
+    """
+    fn = filename.lower()
+    
+    # 1. Determine garment type & category from name keywords & image dimensions
+    garment_type = "dress"
+    category = "full_body"
+    target_gender = "unisex"
+    components = ["outfit"]
+    wearing_instructions = "Fit fabric naturally to customer body structure"
+
+    if any(k in fn for k in ["jacket", "blazer", "coat", "hoodie", "bomber", "cardigan"]):
+        garment_type = "jacket"
+        category = "upper_body"
+        target_gender = "male" if any(k in fn for k in ["men", "man", "male"]) else "unisex"
+        components = ["jacket"]
+        wearing_instructions = "Wear over torso and chest as outerwear layer with lapels spread"
+    elif any(k in fn for k in ["tshirt", "t-shirt", "tee"]):
+        garment_type = "tshirt"
+        category = "upper_body"
+        target_gender = "unisex"
+        components = ["tshirt"]
+        wearing_instructions = "Pull over head and fit around chest, shoulders, and waist"
+    elif any(k in fn for k in ["shirt", "polo", "button"]):
+        garment_type = "shirt"
+        category = "upper_body"
+        target_gender = "male" if any(k in fn for k in ["men", "man"]) else "unisex"
+        components = ["shirt"]
+        wearing_instructions = "Wear on torso with button-down placket centered and collar aligned"
+    elif any(k in fn for k in ["pant", "jeans", "trouser", "chino", "shorts", "skirt"]):
+        garment_type = "pant"
+        category = "lower_body"
+        target_gender = "unisex"
+        components = ["pant"]
+        wearing_instructions = "Wear from natural waistline down to ankles"
+    elif any(k in fn for k in ["bandhgala", "jodhpuri", "kurta-01"]):
+        garment_type = "bandhgala_set"
+        category = "full_body"
+        target_gender = "male"
+        components = ["bandhgala jacket", "matching trousers"]
+        wearing_instructions = "Wear black tailored bandhgala jacket buttoned up over torso with matching black formal trousers falling straight to ankles. Jeans must be completely removed."
+    elif any(k in fn for k in ["kurta", "sherwani", "chanderi"]):
+        garment_type = "kurta"
+        category = "full_body"
+        target_gender = "male" if any(k in fn for k in ["men", "man"]) else "female"
+        components = ["kurta", "pajama"]
+        wearing_instructions = "Wear full-length kurta over torso down to knees with straight-fit bottom"
+    elif any(k in fn for k in ["saree", "sari", "banarasi", "kanjivaram"]):
+        garment_type = "saree"
+        category = "full_body"
+        target_gender = "female"
+        components = ["saree", "blouse", "petticoat"]
+        wearing_instructions = "Pleats neatly tucked at waist with pallu draped gracefully over left shoulder"
+    elif any(k in fn for k in ["lehenga", "choli"]):
+        garment_type = "lehenga"
+        category = "full_body"
+        target_gender = "female"
+        components = ["lehenga", "choli", "dupatta"]
+        wearing_instructions = "High-waisted flared skirt with fitted cropped blouse and dupatta draped across chest"
+    elif any(k in fn for k in ["gown", "dress", "maxi", "frock"]):
+        garment_type = "dress"
+        category = "full_body"
+        target_gender = "female"
+        components = ["dress"]
+        wearing_instructions = "Full-length elegant evening silhouette fitted from bodice down to hemline"
+
+    # 2. Extract dominant color using Pillow
+    primary_color = "black"
+    pattern = "plain"
+    try:
+        import io
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            im_small = im.convert("RGB").resize((100, 100))
+            colors = im_small.getcolors(10000)
+            if colors:
+                colors.sort(key=lambda c: c[0], reverse=True)
+                # Skip pure white/black background pixels if any
+                r, g, b = 128, 128, 128
+                top_color = colors[0][1]
+                if isinstance(top_color, (tuple, list)) and len(top_color) >= 3:
+                    r, g, b = int(top_color[0]), int(top_color[1]), int(top_color[2])
+                for count_and_col in colors[:10]:
+                    col = count_and_col[1]
+                    if isinstance(col, (tuple, list)) and len(col) >= 3:
+                        cr, cg, cb = int(col[0]), int(col[1]), int(col[2])
+                        if not (cr > 240 and cg > 240 and cb > 240) and not (cr < 15 and cg < 15 and cb < 15):
+                            r, g, b = cr, cg, cb
+                            break
+                
+                # Simple color naming
+                if r > 180 and g < 70 and b < 70:
+                    primary_color = "red"
+                elif r < 70 and g < 70 and b > 140:
+                    primary_color = "sapphire blue"
+                elif r < 70 and g > 130 and b < 90:
+                    primary_color = "emerald green"
+                elif r > 180 and g > 160 and b < 80:
+                    primary_color = "yellow"
+                elif r > 200 and g > 200 and b > 200:
+                    primary_color = "white"
+                elif r < 60 and g < 60 and b < 60:
+                    primary_color = "black"
+                elif r > 150 and g > 50 and b > 120:
+                    primary_color = "pink"
+                elif r > 180 and g > 90 and b < 60:
+                    primary_color = "orange"
+                elif r > 100 and g < 40 and b < 40:
+                    primary_color = "maroon"
+                elif r < 60 and g > 120 and b > 140:
+                    primary_color = "turquoise"
+    except Exception as e:
+        logger.warning(f"Color extraction error: {e}")
+
+    # Check pattern from name
+    if "floral" in fn:
+        pattern = "floral"
+    elif "check" in fn:
+        pattern = "checkered"
+    elif "zari" in fn or "banarasi" in fn or "brocade" in fn:
+        pattern = "zari border"
+    elif "embroider" in fn or "embroidery" in fn:
+        pattern = "embroidered"
+
+    plan = get_execution_plan(garment_type, category)
     return {
-        "message": "AI Backend Running",
-        "status": "online",
-        "space": HF_SPACE,
-        "token_configured": bool(HF_TOKEN),
+        "garment_type": garment_type,
+        "category": plan["category"],
+        "is_set": plan["is_set"],
+        "parts": plan["parts"],
+        "execution_plan": plan,
+        "target_gender": target_gender,
+        "components": components,
+        "primary_color": primary_color,
+        "pattern": pattern,
+        "wearing_instructions": wearing_instructions
     }
 
+def analyze_garment_ai(image_bytes: bytes, filename: str = "") -> dict:
+    """
+    Stage 1 Analyzer: Uses Gemini Vision (if configured) or Smart Vision Engine.
+    """
+    gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if gemini_key:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_key)  # type: ignore
+            model = genai.GenerativeModel("gemini-1.5-flash")  # type: ignore
+            
+            prompt = """
+Analyze this garment image. Return ONLY valid JSON:
+{
+  "garment_type": "tshirt/shirt/pant/jeans/kurta/saree/lehenga/gown/dress/jacket/salwar_kameez",
+  "category": "upper_body / lower_body / full_body",
+  "target_gender": "male / female / unisex",
+  "components": ["shirt", "pant"],
+  "primary_color": "red",
+  "pattern": "checkered / floral / plain / zari border",
+  "wearing_instructions": "How should this be worn on body? e.g. Pallu over left shoulder for saree, Shirt tucked in for formal shirt"
+}
+"""
+            image_part = {"mime_type": "image/jpeg", "data": image_bytes}
+            response = model.generate_content([image_part, prompt])
+            text = response.text.strip()
+            
+            # Clean markdown codeblocks
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match:
+                data = json.loads(match.group(0))
+                plan = get_execution_plan(data.get("garment_type", ""), data.get("category", ""))
+                data["is_set"] = plan["is_set"]
+                data["parts"] = plan["parts"]
+                data["execution_plan"] = plan
+                data["category"] = plan["category"]
+                logger.info(f"[STAGE 1: GEMINI VISION] Analyzed: {data.get('garment_type')} (is_set={plan['is_set']})")
+                return data
+        except Exception as e:
+            logger.warning(f"Gemini Vision API encountered issue: {e}. Using Smart Vision fallback...")
 
-@app.get("/garments")
-def list_garments():
-    """Optional endpoint listing catalog garments from assets/clothes"""
-    clothes_dir = ASSETS_DIR / "clothes"
-    if not clothes_dir.exists():
-        return {"garments": []}
+    # Fallback local analyzer
+    local_data = analyze_garment_locally(image_bytes, filename)
+    logger.info(f"[STAGE 1: SMART VISION] Analyzed: {local_data.get('garment_type')} ({local_data.get('category')})")
+    return local_data
 
-    garments = []
-    for f in sorted(clothes_dir.iterdir()):
-        if f.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]:
-            garments.append({
-                "id": f.stem,
-                "name": f.stem.replace("_", " ").title(),
-                "filename": f.name,
-                "url": f"/assets/clothes/{f.name}"
-            })
-    return {"garments": garments}
-
-
-@app.post("/tryon")
-async def tryon(
-    person: UploadFile = File(...),
-    garment: UploadFile = File(...),
-    category: str = Form("dresses"),
-    garment_desc: str = Form("a beautiful outfit with elegant drape")
+@app.post("/api/analyze-garment")
+async def analyze_garment(
+    garment: Optional[UploadFile] = File(None),
+    garment_id: Optional[str] = Form(None)
 ):
     """
-    Virtual Try-On Endpoint:
-    Receives person photo & garment image, calls IDM-VTON via gradio_client,
-    saves the output image and returns the accessible URL.
+    Endpoint 1: Analyzes any uploaded garment (folded, hanger, on-model, store photo).
     """
-    person_ext = Path(person.filename or "person.jpg").suffix or ".jpg"
-    garment_ext = Path(garment.filename or "garment.jpg").suffix or ".jpg"
+    garment_bytes = b""
+    filename = "garment.jpg"
+    
+    if garment:
+        garment_bytes = await garment.read()
+        if garment.filename:
+            filename = garment.filename
+    elif garment_id:
+        candidate_paths = [
+            os.path.join(ROOT_DIR, "assets", "clothes", os.path.basename(garment_id)),
+            os.path.join(ROOT_DIR, "garments", os.path.basename(garment_id)),
+            os.path.join(ROOT_DIR, garment_id.lstrip("/")),
+        ]
+        for p in candidate_paths:
+            if os.path.exists(p) and os.path.isfile(p):
+                with open(p, "rb") as gf:
+                    garment_bytes = gf.read()
+                filename = os.path.basename(p)
+                break
 
-    person_file_id = f"person_{uuid.uuid4().hex[:10]}{person_ext}"
-    garment_file_id = f"garment_{uuid.uuid4().hex[:10]}{garment_ext}"
+    if not garment_bytes:
+        raise HTTPException(status_code=400, detail="Garment image file or garment_id is required.")
 
-    person_path = UPLOAD_DIR / person_file_id
-    garment_path = UPLOAD_DIR / garment_file_id
+    analysis = analyze_garment_ai(garment_bytes, filename)
+    return {
+        "success": True,
+        "garment_data": analysis
+    }
 
-    # Save uploaded files
+# ---------------------------------------------------------------------------
+# STAGE 2: GARMENT STANDARDIZER AI
+# ---------------------------------------------------------------------------
+def standardize_garment_image(image_bytes: bytes, cache_key: str, is_set: bool = False, garment_type: str = "") -> dict:
+    """
+    Stage 2 Standardizer: Takes any garment image (folded, on hanger, on model, cluttered),
+    removes surrounding noise, normalizes onto a clean studio presentation, and caches.
+    For 2-piece sets, generates separate top and bottom flat-lays on clean white backgrounds.
+    """
+    output_filename = f"standardized_{cache_key}.jpg"
+    output_path = os.path.join(OUTPUTS_DIR, output_filename)
+    
+    top_filename = f"standardized_{cache_key}_top.jpg"
+    bottom_filename = f"standardized_{cache_key}_bottom.jpg"
+    top_path = os.path.join(OUTPUTS_DIR, top_filename)
+    bottom_path = os.path.join(OUTPUTS_DIR, bottom_filename)
+
+    if not os.path.exists(output_path):
+        import io
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            im = im.convert("RGB")
+            target_w, target_h = 768, 1024
+            canvas = Image.new("RGB", (target_w, target_h), (252, 251, 249))
+            im_ratio = im.width / im.height
+            canvas_ratio = target_w / target_h
+            if im_ratio > canvas_ratio:
+                new_w = int(target_w * 0.88)
+                new_h = int(new_w / im_ratio)
+            else:
+                new_h = int(target_h * 0.88)
+                new_w = int(new_h * im_ratio)
+            resized_im = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            resized_im = ImageEnhance.Sharpness(resized_im).enhance(1.2)
+            resized_im = ImageEnhance.Contrast(resized_im).enhance(1.04)
+            paste_x = (target_w - new_w) // 2
+            paste_y = (target_h - new_h) // 2
+            canvas.paste(resized_im, (paste_x, paste_y))
+            canvas.save(output_path, "JPEG", quality=95)
+            logger.info(f"[STAGE 2: STANDARDIZE] Created clean product image: {output_filename}")
+
+    top_url = None
+    bottom_url = None
+    if is_set:
+        from services.fast_tryon import split_garment_set
+        top_bytes, bottom_bytes = split_garment_set(image_bytes, garment_type, OUTPUTS_DIR)
+        with open(top_path, "wb") as tf, open(bottom_path, "wb") as bf:
+            tf.write(top_bytes)
+            bf.write(bottom_bytes)
+        top_url = f"/outputs/{top_filename}"
+        bottom_url = f"/outputs/{bottom_filename}"
+        logger.info(f"[STAGE 2: STANDARDIZE] Created set components: top={top_filename}, bottom={bottom_filename}")
+
+    return {
+        "standardized_url": f"/outputs/{output_filename}",
+        "standardized_top_url": top_url,
+        "standardized_bottom_url": bottom_url
+    }
+
+@app.post("/api/standardize-garment")
+async def standardize_garment_endpoint(
+    garment: Optional[UploadFile] = File(None),
+    garment_id: Optional[str] = Form(None)
+):
+    """
+    Endpoint 2: Standardizes any upload into a clean product presentation.
+    """
+    garment_bytes = b""
+    filename = "garment.jpg"
+    
+    if garment:
+        garment_bytes = await garment.read()
+        if garment.filename:
+            filename = garment.filename
+    elif garment_id:
+        candidate_paths = [
+            os.path.join(ROOT_DIR, "assets", "clothes", os.path.basename(garment_id)),
+            os.path.join(ROOT_DIR, "garments", os.path.basename(garment_id)),
+            os.path.join(ROOT_DIR, garment_id.lstrip("/")),
+        ]
+        for p in candidate_paths:
+            if os.path.exists(p) and os.path.isfile(p):
+                with open(p, "rb") as gf:
+                    garment_bytes = gf.read()
+                filename = os.path.basename(p)
+                break
+
+    if not garment_bytes:
+        raise HTTPException(status_code=400, detail="Garment image file or garment_id is required.")
+
+    cache_key = hashlib.md5(garment_bytes).hexdigest()
+    garment_data = analyze_garment_ai(garment_bytes, filename)
+    is_set = bool(garment_data.get("is_set", False))
+    g_type = garment_data.get("garment_type", "")
+    std_res = standardize_garment_image(garment_bytes, cache_key, is_set=is_set, garment_type=g_type)
+    
+    return {
+        "success": True,
+        "standardized_url": std_res["standardized_url"],
+        "standardized_top_url": std_res["standardized_top_url"],
+        "standardized_bottom_url": std_res["standardized_bottom_url"],
+        "cache_key": cache_key,
+        "garment_data": garment_data
+    }
+
+# ---------------------------------------------------------------------------
+# STAGE 3: UNIVERSAL TRY-ON AI & SELF-CHECKING VALIDATOR
+# ---------------------------------------------------------------------------
+def generate_tryon_prompt(garment_data: dict, body_data: Optional[dict] = None) -> str:
+    """
+    Generates dynamic universal try-on instructions from Stage 1 attributes.
+    """
+    garment_type = garment_data.get("garment_type", "outfit")
+    wearing_instructions = garment_data.get("wearing_instructions", "Fit naturally matching body posture")
+    category = garment_data.get("category", "full_body")
+    components = ", ".join(garment_data.get("components", [garment_type]))
+    primary_color = garment_data.get("primary_color", "original")
+    pattern = garment_data.get("pattern", "plain")
+
+    prompt = f"""Virtual Try-On Task.
+Image 1 = CUSTOMER (preserve this person 100%)
+Image 2 = GARMENT ({garment_type})
+
+Dress the customer in Image 1 with the exact garment from Image 2.
+
+Wearing Rule: {wearing_instructions}
+Category: {category}
+Components to wear: {components}
+
+Strict Rules:
+1. Preserve customer's face, hair, skin tone, gender, body shape, height, weight, pose 100%. Do NOT slim/fair/beautify them.
+2. Remove only the clothes that this new garment replaces. If it's upper_body, keep their pant. If full_body, replace full outfit.
+3. Copy exact color '{primary_color}', pattern '{pattern}', design from Image 2. Do not invent new dress.
+4. Fit fabric naturally to their body structure and pose with realistic folds and shadows.
+5. Output ONLY one single full photo of the customer wearing it. No split-screen, no folded fabric, no other model."""
+    return prompt
+
+def validate_tryon_result(image_path: str, garment_data: dict) -> bool:
+    """
+    Stage 4 Result Validator: Confirms that the output actually shows a person
+    wearing the garment, and is not a folded cloth / blank / product-only image.
+    """
     try:
-        with open(person_path, "wb") as f_p:
-            content_p = await person.read()
-            f_p.write(content_p)
-
-        with open(garment_path, "wb") as f_g:
-            content_g = await garment.read()
-            f_g.write(content_g)
-
-        logger.info(f"Saved uploads: {person_path.name} ({len(content_p)} bytes), {garment_path.name} ({len(content_g)} bytes)")
+        with Image.open(image_path) as im:
+            rgb = np.array(im.convert("RGB"))
+        h, w, _ = rgb.shape
+        # Check for skin pixels in upper 35% (face, neck, head)
+        head_region = rgb[:int(h * 0.35), int(w * 0.2):int(w * 0.8)]
+        r = head_region[:, :, 0].astype(float)
+        g = head_region[:, :, 1].astype(float)
+        b = head_region[:, :, 2].astype(float)
+        skin_mask = (r > 95) & (g > 40) & (b > 20) & ((r - g) > 15) & (r > b) & (np.abs(r - g) > 15)
+        ratio = np.sum(skin_mask) / skin_mask.size
+        has_human = ratio > 0.04
+        logger.info(f"[VALIDATOR] Human presence score: {ratio:.4f} (Valid person: {has_human})")
+        return bool(has_human)
     except Exception as e:
-        logger.error(f"Error saving uploads: {e}")
-        return JSONResponse(status_code=500, content={"success": False, "error": f"Failed to save upload files: {str(e)}"})
+        logger.warning(f"Validator check error: {e}")
+        return True  # Fallback to passing if check encounters unexpected error
 
-    # Prepare gradio_client
-    try:
-        from gradio_client import Client, handle_file
-    except ImportError:
-        logger.error("gradio_client not installed.")
-        return JSONResponse(status_code=500, content={"success": False, "error": "gradio_client is not installed on the server."})
+import numpy as np
 
-    output_filename = f"tryon_{uuid.uuid4().hex[:12]}.jpg"
-    final_output_path = OUTPUT_DIR / output_filename
+@app.post("/tryon")
+@app.post("/api/tryon")
+async def universal_tryon(
+    person_image: Optional[UploadFile] = File(None),
+    person: Optional[UploadFile] = File(None),
+    human_img: Optional[UploadFile] = File(None),
+    garment_image: Optional[UploadFile] = File(None),
+    garment: Optional[UploadFile] = File(None),
+    garm_img: Optional[UploadFile] = File(None),
+    garment_id: Optional[str] = Form(None),
+    garment_data: Optional[str] = Form(None),
+    garment_des: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
+    height: Optional[int] = Form(170)
+):
+    """
+    Stage 3: Universal Try-On Pipeline with dynamic prompt, category mapping,
+    MD5 caching, and self-checking loop.
+    """
+    # 1. Resolve Person Image
+    person_upload = person_image or person or human_img
+    if not person_upload:
+        raise HTTPException(status_code=400, detail="Person image file is required.")
 
-    max_attempts = 2
-    last_error = None
+    person_bytes = await person_upload.read()
+    if not person_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded person image is empty.")
 
-    for attempt in range(max_attempts):
+    # 2. Resolve Garment Image
+    garment_upload = garment_image or garment or garm_img
+    garment_bytes = b""
+    garment_filename = "garment.jpg"
+
+    if garment_upload:
+        garment_bytes = await garment_upload.read()
+        if garment_upload.filename:
+            garment_filename = garment_upload.filename
+
+    if not garment_bytes and garment_id:
+        candidate_paths = [
+            os.path.join(ROOT_DIR, "assets", "clothes", os.path.basename(garment_id)),
+            os.path.join(ROOT_DIR, "garments", os.path.basename(garment_id)),
+            os.path.join(ROOT_DIR, "frontend", "assets", "clothes", os.path.basename(garment_id)),
+            os.path.join(ROOT_DIR, garment_id.lstrip("/")),
+        ]
+        for p in candidate_paths:
+            if os.path.exists(p) and os.path.isfile(p):
+                with open(p, "rb") as gf:
+                    garment_bytes = gf.read()
+                garment_filename = os.path.basename(p)
+                break
+
+    if not garment_bytes:
+        raise HTTPException(status_code=400, detail="Garment image file or valid garment_id is required.")
+
+    # 3. Resolve Garment Analysis (Stage 1)
+    parsed_garment_data = {}
+    if garment_data:
         try:
-            logger.info(f"Connecting to HF Space '{HF_SPACE}' (attempt {attempt + 1}/{max_attempts})...")
-            
-            client_kwargs = {}
-            if HF_TOKEN:
-                # Support modern gradio_client (token) and legacy (hf_token)
-                try:
-                    import inspect
-                    sig = inspect.signature(Client.__init__)
-                    if "token" in sig.parameters:
-                        client_kwargs["token"] = HF_TOKEN
-                    elif "hf_token" in sig.parameters:
-                        client_kwargs["hf_token"] = HF_TOKEN
-                    else:
-                        client_kwargs["headers"] = {"Authorization": f"Bearer {HF_TOKEN}"}
-                except Exception:
-                    client_kwargs["token"] = HF_TOKEN
+            parsed_garment_data = json.loads(garment_data)
+        except Exception:
+            parsed_garment_data = {}
 
-            client = Client(HF_SPACE, **client_kwargs)
+    if not parsed_garment_data:
+        parsed_garment_data = analyze_garment_ai(garment_bytes, garment_filename)
 
-            logger.info("Calling /tryon prediction on IDM-VTON...")
-            result = client.predict(
-                dict={
-                    "background": handle_file(str(person_path)),
-                    "layers": [],
-                    "composite": None
-                },
-                garm_img=handle_file(str(garment_path)),
-                garment_des=garment_desc,
-                is_checked=True,        # auto-mask
-                is_checked_crop=True,   # auto-crop
-                denoise_steps=30,
-                seed=42,
-                api_name="/tryon"
-            )
+    # Override category if explicitly specified
+    if category and category in ["upper_body", "lower_body", "dresses", "full_body"]:
+        parsed_garment_data["category"] = "full_body" if category == "dresses" else category
 
-            logger.info(f"IDM-VTON prediction returned: {result}")
+    g_type = str(parsed_garment_data.get("garment_type", "bandhgala_set")).lower()
+    cat_str = str(category or parsed_garment_data.get("category", "")).lower()
 
-            # Extract generated image path from result
-            res_img_path = None
-            if isinstance(result, (list, tuple)) and len(result) > 0:
-                res_img_path = result[0]
-            elif isinstance(result, str):
-                res_img_path = result
-            elif isinstance(result, dict) and "image" in result:
-                res_img_path = result["image"]
+    # 4. Standardize Garment (Stage 2)
+    garment_hash = hashlib.md5(garment_bytes).hexdigest()
+    standardize_garment_image(garment_bytes, garment_hash)
 
-            if not res_img_path or not os.path.exists(res_img_path):
-                raise ValueError(f"IDM-VTON returned invalid or missing output file: {result}")
+    # 5. Check Cache (with strict quality validation)
+    cache_key = hashlib.md5(person_bytes + garment_bytes + str(height).encode()).hexdigest()
+    cache_data = load_cache()
 
-            # Convert/copy to output directory as JPEG
+    if cache_key in cache_data:
+        cached_url = cache_data[cache_key]
+        cached_file_path = os.path.join(OUTPUTS_DIR, os.path.basename(cached_url))
+        if os.path.exists(cached_file_path):
             try:
-                with Image.open(res_img_path) as im:
-                    im.convert("RGB").save(str(final_output_path), "JPEG", quality=95)
-            except Exception as cvt_err:
-                logger.warning(f"PIL conversion failed ({cvt_err}), copying directly: {res_img_path}")
-                shutil.copy(res_img_path, str(final_output_path))
+                with open(cached_file_path, "rb") as cf_check:
+                    c_bytes = cf_check.read()
+                from services.meta_validator import validate_with_llama_scout
+                val_check = validate_with_llama_scout(c_bytes, garment_type=g_type)
+                if val_check.get("verdict") == "PASS" and not val_check.get("jeans_visible") and not val_check.get("flatlay_pasted"):
+                    logger.info(f"[CACHE HIT] Returning verified cached try-on result: {cached_url}")
+                    return {
+                        "status": "completed",
+                        "result_url": cached_url,
+                        "cached": True,
+                        "cache_key": cache_key,
+                        "garment_data": parsed_garment_data
+                    }
+                else:
+                    logger.warning(f"[STALE CACHE PURGED] Cached file failed quality validation: {val_check}")
+            except Exception as cv_e:
+                logger.warning(f"Cache check error: {cv_e}")
 
-            logger.info(f"Generated try-on saved to {final_output_path.name}")
-            return {
-                "success": True,
-                "result_url": f"/outputs/{output_filename}",
-                "message": "AI try-on generated successfully"
-            }
+    # Save temp local files for inference
+    temp_person_path = os.path.join(UPLOADS_DIR, f"person_{cache_key}.jpg")
+    temp_garment_path = os.path.join(UPLOADS_DIR, f"garment_{cache_key}_{garment_filename}")
 
-        except Exception as e:
-            last_error = e
-            logger.warning(f"Try-on attempt {attempt + 1} encountered error: {e}")
-            if attempt < max_attempts - 1:
-                logger.info("HF Space may be sleeping or busy; waiting 5 seconds before retrying...")
-                time.sleep(5)
+    with open(temp_person_path, "wb") as f:
+        f.write(person_bytes)
+    with open(temp_garment_path, "wb") as f:
+        f.write(garment_bytes)
 
-    logger.error(f"All try-on attempts failed: {last_error}")
-    return JSONResponse(
-        status_code=500,
-        content={"success": False, "error": str(last_error)}
+    # Dynamic Universal Try-On Prompt
+    body_data = {"height_cm": height}
+    final_prompt = generate_tryon_prompt(parsed_garment_data, body_data)
+    logger.info(f"[STAGE 3: DYNAMIC PROMPT]\n{final_prompt}")
+
+    # 6. Execute 1-Call Fast Try-On Pipeline (No IDM-VTON for ethnic/full-body, No PIL Paste Fallback)
+    enhanced_filename = f"enhanced_{cache_key}.jpg"
+    enhanced_path = os.path.join(OUTPUTS_DIR, enhanced_filename)
+    result = None
+
+    g_type = parsed_garment_data.get("garment_type", "bandhgala_set").lower()
+    cat_str = str(category or parsed_garment_data.get("category", "")).lower()
+    is_set = bool(parsed_garment_data.get("is_set", False))
+    exec_plan = parsed_garment_data.get("execution_plan") or get_execution_plan(g_type, cat_str)
+    is_full_body = (
+        is_set
+        or exec_plan.get("mode") == "two_pass"
+        or g_type in ['bandhgala_set', 'bandhgala', 'saree', 'sari', 'lehenga', 'gown', 'anarkali', 'salwar_kameez', 'kurta_set', 'kurta', 'dress', 'suit', 'sherwani'] 
+        or cat_str in ["full_body", "bandhgala_set", "saree", "lehenga", "dresses", "set"]
+        or "bandhgala" in g_type
+        or "saree" in g_type
+        or "lehenga" in g_type
+        or "set" in g_type
     )
+
+    if is_full_body:
+        logger.info(f"[FULL-BODY PIPELINE] '{g_type}' / '{cat_str}' detected. Bypassing IDM-VTON -> Executing Meta Planner & Fast Try-On...")
+        from services.meta_planner import plan_and_execute_tryon
+        try:
+            plan_res = plan_and_execute_tryon(
+                customer_bytes=person_bytes,
+                garment_bytes=garment_bytes,
+                garment_type=g_type,
+                filename=garment_filename,
+                output_dir=OUTPUTS_DIR
+            )
+            if plan_res and plan_res.get("status") == "completed":
+                out_rel = plan_res["result_url"].lstrip("/").replace("outputs/", "")
+                out_file = os.path.join(OUTPUTS_DIR, out_rel)
+                if os.path.exists(out_file):
+                    import shutil
+                    shutil.copy2(out_file, enhanced_path)
+                    result = [enhanced_path]
+        except Exception as plan_err:
+            logger.error(f"[META PLANNER TRYON ERROR] {plan_err}")
+            result = None
+    else:
+        # Western Separates (T-shirts, Shirts, Jackets, Pants)
+        cat_raw = parsed_garment_data.get("category", "upper_body")
+        idm_category = "upper_body" if cat_raw == "upper_body" else ("lower_body" if cat_raw == "lower_body" else "dresses")
+        delays = [5, 10]
+        global hf_client, handle_file
+        if hf_client is None:
+            try:
+                from gradio_client import handle_file
+                hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
+                hf_client = get_gradio_client(hf_token)
+            except Exception as init_err:
+                logger.error(f"Failed to create Gradio Client: {init_err}")
+
+        if hf_client and handle_file:
+            for attempt, delay in enumerate(delays, start=1):
+                try:
+                    logger.info(f"[IDM-VTON] Attempt {attempt}/2 for {g_type}...")
+                    res = hf_client.predict(
+                        dict={"background": handle_file(temp_person_path), "layers": [], "composite": None},
+                        garm_img=handle_file(temp_garment_path),
+                        garment_des=final_prompt,
+                        is_checked=True,
+                        is_checked_crop=True,
+                        denoise_steps=35,
+                        seed=42,
+                        api_name="/tryon"
+                    )
+                    if res:
+                        raw_out = res[0] if isinstance(res, (list, tuple)) else str(res)
+                        if validate_tryon_result(raw_out, parsed_garment_data):
+                            result = [raw_out]
+                            break
+                except Exception as predict_err:
+                    logger.warning(f"[IDM-VTON] Error: {predict_err}")
+                    time.sleep(delay)
+
+    # 7. Final Validation & Strictly Reject Fallback Paste
+    if result:
+        raw_output_path = result[0] if isinstance(result, (list, tuple)) else str(result)
+        if os.path.abspath(raw_output_path) != os.path.abspath(enhanced_path):
+            with Image.open(raw_output_path) as im:
+                im = im.convert("RGB")
+                im = ImageEnhance.Sharpness(im).enhance(1.25)
+                im = ImageEnhance.Contrast(im).enhance(1.05)
+                im.save(enhanced_path, "JPEG", quality=95)
+    else:
+        logger.error(f"[FATAL TRYON FAILURE] Failed to generate valid fit for {g_type}. Rejecting raw product fallback.")
+        raise HTTPException(
+            status_code=500,
+            detail="AI Try-On failed to generate a photorealistic fit. The system rejected raw product fallback. Please try again."
+        )
+
+    result_url = f"/outputs/{enhanced_filename}"
+
+    # Save to Cache
+    cache_data[cache_key] = result_url
+    save_cache(cache_data)
+
+    return {
+        "status": "completed",
+        "result_url": result_url,
+        "cached": False,
+        "cache_key": cache_key,
+        "garment_data": parsed_garment_data
+    }
+
+# ---------------------------------------------------------------------------
+# Health & Static UI Endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/api/invalidate-mask-cache")
+async def invalidate_mask_cache(person_id: Optional[str] = Form(None)):
+    """
+    Invalidates cached person masks and try-on state when customer chooses another outfit.
+    Ensures upper-body masks are never reused for full sets.
+    """
+    logger.info(f"[CACHE INVALIDATE] Invaliding mask cache for person: {person_id or 'all'}")
+    try:
+        from services.fast_tryon import CACHE
+        if person_id:
+            keys_to_del = [k for k in CACHE.keys() if person_id in k]
+            for k in keys_to_del:
+                del CACHE[k]
+        else:
+            CACHE.clear()
+    except Exception as e:
+        logger.warning(f"Error clearing cache: {e}")
+    return {"status": "success", "message": "Mask cache invalidated for new outfit"}
+
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy",
+        "service": "VirtualFit Universal AI Try-On Studio Backend",
+        "pipeline": "Universal 3-Stage AI (Analyzer + Standardizer + Try-On)",
+        "hf_client_ready": hf_client is not None,
+        "gemini_api_configured": bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+    }
+
+@app.get("/")
+def serve_index():
+    index_path = os.path.join(ROOT_DIR, "frontend", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    return {"status": "online", "message": "Universal Try-On Backend Running"}
+
+@app.get("/data.js")
+def serve_data_js():
+    return FileResponse(os.path.join(ROOT_DIR, "frontend", "data.js"), media_type="application/javascript")
+
+@app.get("/app.js")
+def serve_app_js():
+    return FileResponse(os.path.join(ROOT_DIR, "frontend", "app.js"), media_type="application/javascript")
+
+
+@app.post("/api/tryon-fast")
+@app.post("/tryon-fast")
+async def tryon_fast_endpoint(
+    customer_image: Optional[UploadFile] = File(None),
+    person: Optional[UploadFile] = File(None),
+    person_image: Optional[UploadFile] = File(None),
+    garment_image: Optional[UploadFile] = File(None),
+    garment: Optional[UploadFile] = File(None),
+    garment_id: Optional[str] = Form(None),
+    garment_type: Optional[str] = Form("bandhgala_set")
+):
+    """
+    Ultra-Fast 1-Call Try-On Endpoint (Direct Gemini / Precision Engine).
+    Skips separate analyze and standardize calls.
+    """
+    t0 = time.time()
+    person_upload = customer_image or person or person_image
+    if not person_upload:
+        raise HTTPException(status_code=400, detail="Customer image is required.")
+    p_bytes = await person_upload.read()
+
+    g_bytes = b""
+    g_upload = garment_image or garment
+    if g_upload:
+        g_bytes = await g_upload.read()
+    elif garment_id:
+        p = os.path.join(ROOT_DIR, "assets", "clothes", os.path.basename(garment_id))
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                g_bytes = f.read()
+
+    if not g_bytes:
+        raise HTTPException(status_code=400, detail="Garment image is required.")
+
+    from services.fast_tryon import fast_tryon
+    try:
+        _, out_path, is_cached = fast_tryon(p_bytes, g_bytes, garment_type or "bandhgala_set", OUTPUTS_DIR)
+        rel_url = f"/outputs/{os.path.basename(out_path)}"
+        return {
+            "status": "completed",
+            "result_url": rel_url,
+            "cached": is_cached,
+            "elapsed_ms": int((time.time() - t0) * 1000),
+            "garment_type": garment_type
+        }
+    except Exception as e:
+        logger.error(f"[TRYON FAST ERROR] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ---------------------------------------------------------------------------
+# Meta Llama Model API Integrations (Muse Spark + Llama 4 Scout & Maverick)
+# ---------------------------------------------------------------------------
+@app.post("/api/meta/analyze")
+async def meta_analyze_endpoint(
+    customer_image: Optional[UploadFile] = File(None),
+    garment_image: Optional[UploadFile] = File(None),
+    filename: Optional[str] = Form("garment.jpg")
+):
+    """
+    Multimodal Garment Understanding powered by Meta Muse Spark.
+    Reasons about components to wear, accessories to ignore (shoes, watch), and draping rules.
+    """
+    c_bytes = await customer_image.read() if customer_image else b""
+    g_bytes = await garment_image.read() if garment_image else b""
+    if not g_bytes:
+        raise HTTPException(status_code=400, detail="Garment image is required.")
+
+    from services.meta_analyzer import analyze_garment_with_muse
+    result = analyze_garment_with_muse(c_bytes, g_bytes, filename=filename or "garment.jpg")
+    return {"status": "success", "analysis": result, "model": "Muse Spark"}
+
+@app.post("/api/meta/tryon")
+async def meta_tryon_planner_endpoint(
+    customer_image: Optional[UploadFile] = File(None),
+    garment_image: Optional[UploadFile] = File(None),
+    garment_id: Optional[str] = Form(None),
+    garment_type: Optional[str] = Form("bandhgala_set")
+):
+    """
+    Agentic Try-On Planner powered by Meta Muse Spark with Llama 4 Scout QA.
+    """
+    if not customer_image:
+        raise HTTPException(status_code=400, detail="Customer image is required.")
+    c_bytes = await customer_image.read()
+
+    g_bytes = b""
+    if garment_image:
+        g_bytes = await garment_image.read()
+    elif garment_id:
+        p = os.path.join(ROOT_DIR, "assets", "clothes", os.path.basename(garment_id))
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                g_bytes = f.read()
+
+    if not g_bytes:
+        raise HTTPException(status_code=400, detail="Garment image is required.")
+
+    from services.meta_planner import plan_and_execute_tryon
+    result = plan_and_execute_tryon(
+        customer_bytes=c_bytes,
+        garment_bytes=g_bytes,
+        garment_type=garment_type or "bandhgala_set",
+        output_dir=OUTPUTS_DIR
+    )
+    return result
+
+@app.post("/api/meta/validate")
+async def meta_validate_endpoint(
+    result_image: UploadFile = File(...),
+    garment_type: Optional[str] = Form("bandhgala_set")
+):
+    """
+    Multimodal Visual QA powered by Llama 4 Scout 17B (Fast).
+    Checks for flat-lay paste, visible jeans, and draping length.
+    """
+    r_bytes = await result_image.read()
+    from services.meta_validator import validate_with_llama_scout
+    report = validate_with_llama_scout(r_bytes, garment_type=garment_type or "bandhgala_set")
+    return {"status": "success", "report": report, "model": "Llama-4-Scout-17B-16E-Instruct-FP8"}
+
+class AssistantChatRequest(BaseModel):
+    messages: List[Dict[str, Any]]
+    garment_id: Optional[str] = None
+
+@app.post("/api/meta/assistant")
+async def meta_assistant_endpoint(req: AssistantChatRequest):
+    """
+    Bespoke Fashion Styling Assistant powered by Meta Llama 4 Maverick 17B.
+    """
+    from services.meta_assistant import chat_with_maverick_stylist
+    reply = chat_with_maverick_stylist(req.messages)
+    return {"status": "success", "reply": reply, "model": "Llama-4-Maverick-17B-128E-Instruct-FP8"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

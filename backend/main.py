@@ -43,6 +43,7 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 # Load environment variables
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
+from services.meta_analyzer import get_execution_plan, SET_TYPES
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("universal-tryon-backend")
@@ -250,9 +251,13 @@ def analyze_garment_locally(image_bytes: bytes, filename: str = "") -> dict:
     elif "embroider" in fn or "embroidery" in fn:
         pattern = "embroidered"
 
+    plan = get_execution_plan(garment_type, category)
     return {
         "garment_type": garment_type,
-        "category": category,
+        "category": plan["category"],
+        "is_set": plan["is_set"],
+        "parts": plan["parts"],
+        "execution_plan": plan,
         "target_gender": target_gender,
         "components": components,
         "primary_color": primary_color,
@@ -291,7 +296,12 @@ Analyze this garment image. Return ONLY valid JSON:
             match = re.search(r"\{.*\}", text, re.DOTALL)
             if match:
                 data = json.loads(match.group(0))
-                logger.info(f"[STAGE 1: GEMINI VISION] Analyzed: {data.get('garment_type')} ({data.get('category')})")
+                plan = get_execution_plan(data.get("garment_type", ""), data.get("category", ""))
+                data["is_set"] = plan["is_set"]
+                data["parts"] = plan["parts"]
+                data["execution_plan"] = plan
+                data["category"] = plan["category"]
+                logger.info(f"[STAGE 1: GEMINI VISION] Analyzed: {data.get('garment_type')} (is_set={plan['is_set']})")
                 return data
         except Exception as e:
             logger.warning(f"Gemini Vision API encountered issue: {e}. Using Smart Vision fallback...")
@@ -341,51 +351,60 @@ async def analyze_garment(
 # ---------------------------------------------------------------------------
 # STAGE 2: GARMENT STANDARDIZER AI
 # ---------------------------------------------------------------------------
-def standardize_garment_image(image_bytes: bytes, cache_key: str) -> str:
+def standardize_garment_image(image_bytes: bytes, cache_key: str, is_set: bool = False, garment_type: str = "") -> dict:
     """
     Stage 2 Standardizer: Takes any garment image (folded, on hanger, on model, cluttered),
     removes surrounding noise, normalizes onto a clean studio presentation, and caches.
+    For 2-piece sets, generates separate top and bottom flat-lays on clean white backgrounds.
     """
     output_filename = f"standardized_{cache_key}.jpg"
     output_path = os.path.join(OUTPUTS_DIR, output_filename)
     
-    if os.path.exists(output_path):
-        return f"/outputs/{output_filename}"
+    top_filename = f"standardized_{cache_key}_top.jpg"
+    bottom_filename = f"standardized_{cache_key}_bottom.jpg"
+    top_path = os.path.join(OUTPUTS_DIR, top_filename)
+    bottom_path = os.path.join(OUTPUTS_DIR, bottom_filename)
 
-    import io
-    with Image.open(io.BytesIO(image_bytes)) as im:
-        im = im.convert("RGB")
-        
-        # Center-crop / fit onto neutral studio canvas (768x1024)
-        target_w, target_h = 768, 1024
-        canvas = Image.new("RGB", (target_w, target_h), (252, 251, 249))
-        
-        # Scale maintaining aspect ratio with 10% padding
-        im_ratio = im.width / im.height
-        canvas_ratio = target_w / target_h
-        
-        if im_ratio > canvas_ratio:
-            new_w = int(target_w * 0.88)
-            new_h = int(new_w / im_ratio)
-        else:
-            new_h = int(target_h * 0.88)
-            new_w = int(new_h * im_ratio)
-            
-        resized_im = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        
-        # Enhance contrast & sharpness slightly to pop embroidery/logos
-        resized_im = ImageEnhance.Sharpness(resized_im).enhance(1.2)
-        resized_im = ImageEnhance.Contrast(resized_im).enhance(1.04)
-        
-        # Paste centered
-        paste_x = (target_w - new_w) // 2
-        paste_y = (target_h - new_h) // 2
-        canvas.paste(resized_im, (paste_x, paste_y))
-        
-        canvas.save(output_path, "JPEG", quality=95)
-        logger.info(f"[STAGE 2: STANDARDIZE] Created clean product image: {output_filename}")
+    if not os.path.exists(output_path):
+        import io
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            im = im.convert("RGB")
+            target_w, target_h = 768, 1024
+            canvas = Image.new("RGB", (target_w, target_h), (252, 251, 249))
+            im_ratio = im.width / im.height
+            canvas_ratio = target_w / target_h
+            if im_ratio > canvas_ratio:
+                new_w = int(target_w * 0.88)
+                new_h = int(new_w / im_ratio)
+            else:
+                new_h = int(target_h * 0.88)
+                new_w = int(new_h * im_ratio)
+            resized_im = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            resized_im = ImageEnhance.Sharpness(resized_im).enhance(1.2)
+            resized_im = ImageEnhance.Contrast(resized_im).enhance(1.04)
+            paste_x = (target_w - new_w) // 2
+            paste_y = (target_h - new_h) // 2
+            canvas.paste(resized_im, (paste_x, paste_y))
+            canvas.save(output_path, "JPEG", quality=95)
+            logger.info(f"[STAGE 2: STANDARDIZE] Created clean product image: {output_filename}")
 
-    return f"/outputs/{output_filename}"
+    top_url = None
+    bottom_url = None
+    if is_set:
+        from services.fast_tryon import split_garment_set
+        top_bytes, bottom_bytes = split_garment_set(image_bytes, garment_type, OUTPUTS_DIR)
+        with open(top_path, "wb") as tf, open(bottom_path, "wb") as bf:
+            tf.write(top_bytes)
+            bf.write(bottom_bytes)
+        top_url = f"/outputs/{top_filename}"
+        bottom_url = f"/outputs/{bottom_filename}"
+        logger.info(f"[STAGE 2: STANDARDIZE] Created set components: top={top_filename}, bottom={bottom_filename}")
+
+    return {
+        "standardized_url": f"/outputs/{output_filename}",
+        "standardized_top_url": top_url,
+        "standardized_bottom_url": bottom_url
+    }
 
 @app.post("/api/standardize-garment")
 async def standardize_garment_endpoint(
@@ -419,12 +438,16 @@ async def standardize_garment_endpoint(
         raise HTTPException(status_code=400, detail="Garment image file or garment_id is required.")
 
     cache_key = hashlib.md5(garment_bytes).hexdigest()
-    std_url = standardize_garment_image(garment_bytes, cache_key)
     garment_data = analyze_garment_ai(garment_bytes, filename)
+    is_set = bool(garment_data.get("is_set", False))
+    g_type = garment_data.get("garment_type", "")
+    std_res = standardize_garment_image(garment_bytes, cache_key, is_set=is_set, garment_type=g_type)
     
     return {
         "success": True,
-        "standardized_url": std_url,
+        "standardized_url": std_res["standardized_url"],
+        "standardized_top_url": std_res["standardized_top_url"],
+        "standardized_bottom_url": std_res["standardized_bottom_url"],
         "cache_key": cache_key,
         "garment_data": garment_data
     }
@@ -612,12 +635,17 @@ async def universal_tryon(
 
     g_type = parsed_garment_data.get("garment_type", "bandhgala_set").lower()
     cat_str = str(category or parsed_garment_data.get("category", "")).lower()
+    is_set = bool(parsed_garment_data.get("is_set", False))
+    exec_plan = parsed_garment_data.get("execution_plan") or get_execution_plan(g_type, cat_str)
     is_full_body = (
-        g_type in ['bandhgala_set', 'bandhgala', 'saree', 'sari', 'lehenga', 'gown', 'anarkali', 'salwar_kameez', 'kurta_set', 'kurta', 'dress', 'suit', 'sherwani'] 
-        or cat_str in ["full_body", "bandhgala_set", "saree", "lehenga", "dresses"]
+        is_set
+        or exec_plan.get("mode") == "two_pass"
+        or g_type in ['bandhgala_set', 'bandhgala', 'saree', 'sari', 'lehenga', 'gown', 'anarkali', 'salwar_kameez', 'kurta_set', 'kurta', 'dress', 'suit', 'sherwani'] 
+        or cat_str in ["full_body", "bandhgala_set", "saree", "lehenga", "dresses", "set"]
         or "bandhgala" in g_type
         or "saree" in g_type
         or "lehenga" in g_type
+        or "set" in g_type
     )
 
     if is_full_body:
@@ -711,6 +739,26 @@ async def universal_tryon(
 # ---------------------------------------------------------------------------
 # Health & Static UI Endpoints
 # ---------------------------------------------------------------------------
+
+@app.post("/api/invalidate-mask-cache")
+async def invalidate_mask_cache(person_id: Optional[str] = Form(None)):
+    """
+    Invalidates cached person masks and try-on state when customer chooses another outfit.
+    Ensures upper-body masks are never reused for full sets.
+    """
+    logger.info(f"[CACHE INVALIDATE] Invaliding mask cache for person: {person_id or 'all'}")
+    try:
+        from services.fast_tryon import CACHE
+        if person_id:
+            keys_to_del = [k for k in CACHE.keys() if person_id in k]
+            for k in keys_to_del:
+                del CACHE[k]
+        else:
+            CACHE.clear()
+    except Exception as e:
+        logger.warning(f"Error clearing cache: {e}")
+    return {"status": "success", "message": "Mask cache invalidated for new outfit"}
+
 @app.get("/health")
 def health():
     return {

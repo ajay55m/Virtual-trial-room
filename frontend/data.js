@@ -104,7 +104,16 @@ const UNIVERSAL_GARMENTS = [
     name: "Men's Royal Silk Bandhgala Suit Set",
     type: "bandhgala_set",
     garment_type: "bandhgala_set",
-    category: "full_body",
+    category: "tops",
+    is_set: true,
+    parts: ["tops", "bottoms"],
+    execution_plan: {
+      mode: "two_pass",
+      parts: ["tops", "bottoms"],
+      is_set: true,
+      pass1_target: "tops",
+      pass2_target: "bottoms"
+    },
     gender: "male",
     price: "INR 3,499",
     priceNumber: 3499,
@@ -112,14 +121,24 @@ const UNIVERSAL_GARMENTS = [
     color: "#1e1b4b",
     pattern: "brocade textured",
     wearing_instructions: "Wear black tailored bandhgala jacket buttoned up over torso with matching black formal trousers falling straight to ankles. Jeans must be completely removed.",
-    garment_desc: "a royal Indian men's bandhgala jodhpuri silk jacket with matching black trousers, full body suit, remove jeans completely",
+    garment_desc: "a royal Indian men's bandhgala jodhpuri silk jacket with matching black trousers, full body suit set (2-pass), remove jeans completely",
     badge: "Bespoke"
   },
   {
     id: "garment-06",
     name: "Men's Traditional Festive Kurta Pajama Set",
     type: "kurta",
-    category: "full_body",
+    garment_type: "kurta_set",
+    category: "tops",
+    is_set: true,
+    parts: ["tops", "bottoms"],
+    execution_plan: {
+      mode: "two_pass",
+      parts: ["tops", "bottoms"],
+      is_set: true,
+      pass1_target: "tops",
+      pass2_target: "bottoms"
+    },
     gender: "male",
     price: "INR 2,299",
     priceNumber: 2299,
@@ -127,7 +146,7 @@ const UNIVERSAL_GARMENTS = [
     color: "#ca8a04",
     pattern: "embroidered neckline",
     wearing_instructions: "Wear full-length kurta down to knees paired with straight-cut pajama",
-    garment_desc: "a traditional men's festive silk kurta pajama set with embroidered placket",
+    garment_desc: "a traditional men's festive silk kurta pajama set with embroidered placket (2-pass)",
     badge: "Festive"
   },
   {

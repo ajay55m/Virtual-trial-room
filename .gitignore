@@ -70,3 +70,4 @@ ai-tryon/backend/outputs/*
 !ai-tryon/backend/outputs/.gitkeep
 ai-tryon/backend/uploads/*
 !ai-tryon/backend/uploads/.gitkeep
+outputs/
