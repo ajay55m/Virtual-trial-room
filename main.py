@@ -20,13 +20,22 @@ from dotenv import load_dotenv
 # Setup & Directory Paths
 # ---------------------------------------------------------------------------
 import sys
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if os.path.basename(CURRENT_DIR).lower() == "backend":
+    ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
+    BASE_DIR = CURRENT_DIR
+else:
+    ROOT_DIR = CURRENT_DIR
+    BASE_DIR = os.path.join(ROOT_DIR, "backend")
+
 OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 CACHE_FILE = os.path.join(OUTPUTS_DIR, "cache.json")
+
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 os.makedirs(OUTPUTS_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
@@ -82,6 +91,8 @@ app.add_middleware(
 
 # Mount outputs static directory
 app.mount("/outputs", StaticFiles(directory=OUTPUTS_DIR), name="outputs")
+if os.path.exists(os.path.join(ROOT_DIR, "frontend")):
+    app.mount("/frontend", StaticFiles(directory=os.path.join(ROOT_DIR, "frontend")), name="frontend")
 
 # Mount assets directories
 if os.path.exists(os.path.join(ROOT_DIR, "assets")):
