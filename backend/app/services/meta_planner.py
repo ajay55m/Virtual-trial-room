@@ -113,7 +113,15 @@ def plan_and_execute_tryon(
     val_report = validate_with_llama_scout(result_bytes, garment_type=detected_type)
     
     # Step 4: Autonomous Retry Loop if Validation Fails
-    if val_report.get("verdict") == "FAIL" or val_report.get("is_flatlay_paste") or val_report.get("jeans_visible"):
+    needs_retry = (
+        val_report.get("verdict") == "FAIL"
+        or not val_report.get("wearing_jacket", True)
+        or not val_report.get("wearing_matching_trousers", True)
+        or val_report.get("jeans_visible", False)
+        or val_report.get("flatlay_pasted", False)
+        or val_report.get("is_flatlay_paste", False)
+    )
+    if needs_retry:
         logger.warning(f"[MUSE SPARK RE-PLANNING] Scout rejected attempt: {val_report}. Triggering tool 'retry_with_correction'...")
         correction = "Previous attempt FAILED: do NOT paste flat-lay photo, remove all jeans/pants completely, dress customer in tailored outfit down to ankles."
         
@@ -125,6 +133,17 @@ def plan_and_execute_tryon(
             output_dir=output_dir
         )
         val_report = validate_with_llama_scout(result_bytes, garment_type=detected_type)
+
+    is_failed = (
+        val_report.get("verdict") == "FAIL"
+        or not val_report.get("wearing_jacket", True)
+        or not val_report.get("wearing_matching_trousers", True)
+        or val_report.get("jeans_visible", False)
+        or val_report.get("flatlay_pasted", False)
+    )
+    if is_failed:
+        logger.error(f"[MUSE SPARK FATAL] Validation failed after retry: {val_report}")
+        raise RuntimeError(f"Try-On validation failed: {val_report.get('reason', 'Quality check failed')}. Raw product fallback is forbidden.")
 
     logger.info(f"[MUSE SPARK SUCCESS] Agentic pipeline completed. File: {out_path}")
 

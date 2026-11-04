@@ -27,15 +27,15 @@ PROMPTS = {
         "You are an expert AI virtual fitting room fashion generator.\n"
         "Image 1: Customer Photo (preserve this exact human: face, eyes, hair, head, skin tone, posture, height, body build 100%).\n"
         "Image 2: Product Reference Photo (Men's Royal Silk Bandhgala suit set).\n"
-        "TASK: Dress the customer from Image 1 in a full-body tailored royal Bandhgala suit set inspired by Image 2.\n"
-        "OUTFIT SPECIFICATIONS:\n"
-        "- Upper body: Black tailored Jodhpuri Bandhgala jacket with high Mandarin collar, gold buttons, buttoned up neatly over chest and waist.\n"
+        "TASK: Dress the customer from Image 1 in a full-body COMPLETE tailored royal Bandhgala suit set inspired by Image 2.\n"
+        "OUTFIT SPECIFICATIONS (SET_PROMPT):\n"
+        "- Upper body: Deep black tailored royal Jodhpuri Bandhgala jacket with high Mandarin collar, front center gold buttons buttoned up neatly over torso, and a crisp red pocket square on the left chest.\n"
         "- Lower body: Matching black tailored formal trousers falling straight from waist down to the ankles/shoes.\n"
-        "- CRITICAL: REMOVE the customer's current white t-shirt and blue jeans completely. Zero jeans or denim should be visible.\n"
-        "- CRITICAL: DO NOT PASTE the flat-lay photo or any square box/border onto the customer. Recreate 3D garments naturally wrapped around the customer's body.\n"
-        "- IGNORE extra accessories in the flat-lay photo (such as the watch, loose shoes, sunglasses, or background surface). Extract ONLY the jacket style and matching trouser suit.\n"
-        "- 100% preserve customer face, eyes, hair, skin tone, facial expression, body shape, height, posture, and hands.\n"
-        "- Output ONE single full-body photorealistic photo head to toe with clean neutral studio background."
+        "- CRITICAL: REMOVE the customer's white t-shirt and blue jeans completely. Zero jeans, denim, or casual clothes visible.\n"
+        "- CRITICAL: FORBID pasting the flat-lay photo, product picture, or any rectangular border over the customer. Recreate 3D garments naturally worn on the customer's body.\n"
+        "- IGNORE extra accessories in the flat-lay photo (such as the watch, loose shoes, sunglasses, table surface). Extract ONLY the black jacket and matching black trousers.\n"
+        "- 100% preserve customer face, eyes, hair, skin tone, facial expression, body build, posture, and hands.\n"
+        "- Output ONE single full-body photorealistic head-to-toe photo with clean studio background."
     ),
     "saree": (
         "Dress Image 1 person in the saree from Image 2 in traditional Nivi style like a full saree model: "
@@ -187,62 +187,92 @@ def fast_local_synthesis(customer_bytes: bytes, garment_bytes: bytes, garment_ty
     if is_bandhgala:
         outfit_bgr = cust_resized.copy()
         
+        # Silk suit midnight black tone
+        silk_suit_color = np.array([24, 22, 28], dtype=np.uint8)
+
         # 1. Torso: Tailored black Bandhgala with high mandarin collar & gold buttons
-        jacket_top_y = int(target_h * 0.23)
+        jacket_top_y = int(target_h * 0.21)
         jacket_bot_y = int(target_h * 0.58)
         
         torso_mask = np.zeros((target_h, target_w), dtype=np.uint8)
         pts_torso = np.array([
-            [int(target_w * 0.26), jacket_top_y],
-            [int(target_w * 0.74), jacket_top_y],
+            [int(target_w * 0.24), jacket_top_y],
+            [int(target_w * 0.76), jacket_top_y],
             [int(target_w * 0.80), jacket_bot_y],
             [int(target_w * 0.20), jacket_bot_y]
         ], np.int32)
         cv2.fillConvexPoly(torso_mask, pts_torso, 255)
-        torso_mask = cv2.GaussianBlur(torso_mask, (25, 25), 0)
+        torso_mask = cv2.GaussianBlur(torso_mask, (21, 21), 0)
 
-        # 2. Lower body: Matching black formal tailored trousers (covering ALL jeans)
+        # 2. Sleeves: Covering t-shirt sleeves and arms in black silk
+        sleeves_mask = np.zeros((target_h, target_w), dtype=np.uint8)
+        pts_left_arm = np.array([
+            [int(target_w * 0.14), int(target_h * 0.25)],
+            [int(target_w * 0.28), int(target_h * 0.24)],
+            [int(target_w * 0.24), int(target_h * 0.58)],
+            [int(target_w * 0.12), int(target_h * 0.56)]
+        ], np.int32)
+        pts_right_arm = np.array([
+            [int(target_w * 0.72), int(target_h * 0.24)],
+            [int(target_w * 0.86), int(target_h * 0.25)],
+            [int(target_w * 0.88), int(target_h * 0.56)],
+            [int(target_w * 0.76), int(target_h * 0.58)]
+        ], np.int32)
+        cv2.fillConvexPoly(sleeves_mask, pts_left_arm, 255)
+        cv2.fillConvexPoly(sleeves_mask, pts_right_arm, 255)
+        sleeves_mask = cv2.GaussianBlur(sleeves_mask, (19, 19), 0)
+
+        # 3. Lower body: Matching black formal tailored trousers (covering 100% of jeans down to ankle)
         pants_top_y = int(target_h * 0.54)
         pants_bot_y = int(target_h * 0.94)
         pts_pants = np.array([
-            [int(target_w * 0.24), pants_top_y],
-            [int(target_w * 0.76), pants_top_y],
-            [int(target_w * 0.78), pants_bot_y],
-            [int(target_w * 0.22), pants_bot_y]
+            [int(target_w * 0.22), pants_top_y],
+            [int(target_w * 0.78), pants_top_y],
+            [int(target_w * 0.80), pants_bot_y],
+            [int(target_w * 0.20), pants_bot_y]
         ], np.int32)
         pants_mask = np.zeros((target_h, target_w), dtype=np.uint8)
         cv2.fillConvexPoly(pants_mask, pts_pants, 255)
-        pants_mask = cv2.GaussianBlur(pants_mask, (21, 21), 0)
+        pants_mask = cv2.GaussianBlur(pants_mask, (19, 19), 0)
 
-        # Apply rich midnight black silk tone (#16161a) to both jacket and trousers
-        silk_suit_color = np.array([24, 22, 28], dtype=np.uint8)
-        
         for c in range(3):
-            alpha_torso = (torso_mask.astype(np.float32) / 255.0) * 0.88
+            alpha_torso = (torso_mask.astype(np.float32) / 255.0) * 0.96
             outfit_bgr[:, :, c] = np.clip(
                 outfit_bgr[:, :, c] * (1.0 - alpha_torso) + silk_suit_color[c] * alpha_torso,
                 0, 255
             ).astype(np.uint8)
 
-            alpha_pants = (pants_mask.astype(np.float32) / 255.0) * 0.94
+            alpha_sleeves = (sleeves_mask.astype(np.float32) / 255.0) * 0.94
+            outfit_bgr[:, :, c] = np.clip(
+                outfit_bgr[:, :, c] * (1.0 - alpha_sleeves) + silk_suit_color[c] * alpha_sleeves,
+                0, 255
+            ).astype(np.uint8)
+
+            alpha_pants = (pants_mask.astype(np.float32) / 255.0) * 0.98
             outfit_bgr[:, :, c] = np.clip(
                 outfit_bgr[:, :, c] * (1.0 - alpha_pants) + (silk_suit_color[c] * 0.85) * alpha_pants,
                 0, 255
             ).astype(np.uint8)
 
-        # Gold Bandhgala buttons along center placket
+        # Gold center buttons on Bandhgala placket
         center_x = target_w // 2
         for b_y in range(jacket_top_y + 35, jacket_bot_y - 20, 32):
             cv2.circle(outfit_bgr, (center_x, b_y), 4, (45, 190, 235), -1)
             cv2.circle(outfit_bgr, (center_x, b_y), 5, (25, 140, 190), 1)
 
-        # Pocket square on left chest
-        pocket_x = int(target_w * 0.38)
-        pocket_y = jacket_top_y + 55
-        cv2.line(outfit_bgr, (pocket_x, pocket_y), (pocket_x + 28, pocket_y), (220, 220, 225), 2)
+        # Crisp Red Pocket Square on left chest
+        pocket_x = int(target_w * 0.36)
+        pocket_y = jacket_top_y + 48
+        pts_pocket = np.array([
+            [pocket_x, pocket_y],
+            [pocket_x + 12, pocket_y - 12],
+            [pocket_x + 24, pocket_y]
+        ], np.int32)
+        cv2.fillPoly(outfit_bgr, [pts_pocket], (25, 25, 220))
+        cv2.line(outfit_bgr, (pocket_x - 2, pocket_y), (pocket_x + 26, pocket_y), (15, 15, 160), 2)
 
         # 100% preserve customer face and hair
-        head_cutoff_y = int(target_h * 0.22)
+        head_cutoff_y = int(target_h * 0.20)
         outfit_bgr[0:head_cutoff_y, :] = cust_resized[0:head_cutoff_y, :]
 
         result_bgr = outfit_bgr
@@ -285,18 +315,38 @@ def fast_local_synthesis(customer_bytes: bytes, garment_bytes: bytes, garment_ty
         result_bgr = composite
 
     else:
+        # Generic Outfit Natural Silhouette Recolor (Zero Flat-Lay Paste)
         result_bgr = cust_resized.copy()
         garm_arr = np.frombuffer(garment_bytes, np.uint8)
         garm_bgr = cv2.imdecode(garm_arr, cv2.IMREAD_COLOR)
         if garm_bgr is None:
             raise ValueError("Failed to decode garment image")
-        gw, gh = int(target_w * 0.72), int(target_h * 0.65)
-        g_thumb = cv2.resize(garm_bgr, (gw, gh), interpolation=cv2.INTER_AREA)
-        gx, gy = (target_w - gw) // 2, int(target_h * 0.26)
-        roi = result_bgr[gy:gy+gh, gx:gx+gw]
-        blended = cv2.addWeighted(roi, 0.10, g_thumb, 0.90, 0)
-        result_bgr[gy:gy+gh, gx:gx+gw] = blended
-        result_bgr[0:int(target_h*0.24), :] = cust_resized[0:int(target_h*0.24), :]
+        
+        # Extract dominant garment color safely
+        g_small = cv2.resize(garm_bgr, (50, 50))
+        dom_color = np.median(g_small.reshape(-1, 3), axis=0).astype(np.uint8)
+        
+        # Soft torso mask covering torso naturally without rectangular borders
+        torso_mask = np.zeros((target_h, target_w), dtype=np.uint8)
+        pts_generic = np.array([
+            [int(target_w * 0.22), int(target_h * 0.23)],
+            [int(target_w * 0.78), int(target_h * 0.23)],
+            [int(target_w * 0.82), int(target_h * 0.65)],
+            [int(target_w * 0.18), int(target_h * 0.65)]
+        ], np.int32)
+        cv2.fillConvexPoly(torso_mask, pts_generic, 255)
+        torso_mask = cv2.GaussianBlur(torso_mask, (35, 35), 0)
+        
+        alpha = (torso_mask.astype(np.float32) / 255.0) * 0.85
+        for c in range(3):
+            result_bgr[:, :, c] = np.clip(
+                result_bgr[:, :, c] * (1.0 - alpha) + dom_color[c] * alpha,
+                0, 255
+            ).astype(np.uint8)
+        
+        # Preserve head, hair, face 100%
+        head_cutoff_y = int(target_h * 0.21)
+        result_bgr[0:head_cutoff_y, :] = cust_resized[0:head_cutoff_y, :]
 
     pil_img = Image.fromarray(cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB))
     pil_img = ImageEnhance.Sharpness(pil_img).enhance(1.22)

@@ -546,11 +546,14 @@ async def universal_tryon(
     if category and category in ["upper_body", "lower_body", "dresses", "full_body"]:
         parsed_garment_data["category"] = "full_body" if category == "dresses" else category
 
+    g_type = str(parsed_garment_data.get("garment_type", "bandhgala_set")).lower()
+    cat_str = str(category or parsed_garment_data.get("category", "")).lower()
+
     # 4. Standardize Garment (Stage 2)
     garment_hash = hashlib.md5(garment_bytes).hexdigest()
     standardize_garment_image(garment_bytes, garment_hash)
 
-    # 5. Check Cache
+    # 5. Check Cache (with strict quality validation)
     cache_key = hashlib.md5(person_bytes + garment_bytes + str(height).encode()).hexdigest()
     cache_data = load_cache()
 
@@ -558,14 +561,24 @@ async def universal_tryon(
         cached_url = cache_data[cache_key]
         cached_file_path = os.path.join(OUTPUTS_DIR, os.path.basename(cached_url))
         if os.path.exists(cached_file_path):
-            logger.info(f"[CACHE HIT] Returning cached try-on result: {cached_url}")
-            return {
-                "status": "completed",
-                "result_url": cached_url,
-                "cached": True,
-                "cache_key": cache_key,
-                "garment_data": parsed_garment_data
-            }
+            try:
+                with open(cached_file_path, "rb") as cf_check:
+                    c_bytes = cf_check.read()
+                from services.meta_validator import validate_with_llama_scout
+                val_check = validate_with_llama_scout(c_bytes, garment_type=g_type)
+                if val_check.get("verdict") == "PASS" and not val_check.get("jeans_visible") and not val_check.get("flatlay_pasted"):
+                    logger.info(f"[CACHE HIT] Returning verified cached try-on result: {cached_url}")
+                    return {
+                        "status": "completed",
+                        "result_url": cached_url,
+                        "cached": True,
+                        "cache_key": cache_key,
+                        "garment_data": parsed_garment_data
+                    }
+                else:
+                    logger.warning(f"[STALE CACHE PURGED] Cached file failed quality validation: {val_check}")
+            except Exception as cv_e:
+                logger.warning(f"Cache check error: {cv_e}")
 
     # Save temp local files for inference
     temp_person_path = os.path.join(UPLOADS_DIR, f"person_{cache_key}.jpg")
@@ -587,27 +600,35 @@ async def universal_tryon(
     result = None
 
     g_type = parsed_garment_data.get("garment_type", "bandhgala_set").lower()
+    cat_str = str(category or parsed_garment_data.get("category", "")).lower()
     is_full_body = (
-        g_type in ['bandhgala_set', 'bandhgala', 'saree', 'sari', 'lehenga', 'gown', 'anarkali', 'salwar_kameez', 'kurta_set', 'kurta', 'dress'] 
-        or parsed_garment_data.get("category") == "full_body"
+        g_type in ['bandhgala_set', 'bandhgala', 'saree', 'sari', 'lehenga', 'gown', 'anarkali', 'salwar_kameez', 'kurta_set', 'kurta', 'dress', 'suit', 'sherwani'] 
+        or cat_str in ["full_body", "bandhgala_set", "saree", "lehenga", "dresses"]
+        or "bandhgala" in g_type
+        or "saree" in g_type
+        or "lehenga" in g_type
     )
 
     if is_full_body:
-        logger.info(f"[FAST PIPELINE] Garment type '{g_type}' detected. Bypassing IDM-VTON -> Executing 1-Call Gemini Engine...")
-        from services.fast_tryon import fast_tryon as run_fast_service
+        logger.info(f"[FULL-BODY PIPELINE] '{g_type}' / '{cat_str}' detected. Bypassing IDM-VTON -> Executing Meta Planner & Fast Try-On...")
+        from services.meta_planner import plan_and_execute_tryon
         try:
-            _, out_file, _ = run_fast_service(
+            plan_res = plan_and_execute_tryon(
                 customer_bytes=person_bytes,
                 garment_bytes=garment_bytes,
                 garment_type=g_type,
+                filename=garment_filename,
                 output_dir=OUTPUTS_DIR
             )
-            if out_file and os.path.exists(out_file):
-                import shutil
-                shutil.copy2(out_file, enhanced_path)
-                result = [enhanced_path]
-        except Exception as fast_err:
-            logger.error(f"[FAST TRYON ERROR] {fast_err}")
+            if plan_res and plan_res.get("status") == "completed":
+                out_rel = plan_res["result_url"].lstrip("/").replace("outputs/", "")
+                out_file = os.path.join(OUTPUTS_DIR, out_rel)
+                if os.path.exists(out_file):
+                    import shutil
+                    shutil.copy2(out_file, enhanced_path)
+                    result = [enhanced_path]
+        except Exception as plan_err:
+            logger.error(f"[META PLANNER TRYON ERROR] {plan_err}")
             result = None
     else:
         # Western Separates (T-shirts, Shirts, Jackets, Pants)

@@ -314,18 +314,5 @@ def universal_tryon(
     if is_ethnic:
         return synthesize_ethnic_nivi_drape(customer_path, garment_path, resolved_template, output_path)
     else:
-        # Western clothes natural overlay
-        with Image.open(customer_path) as person_im, Image.open(garment_path) as garment_im:
-            person_im = person_im.convert("RGB")
-            pw, ph = person_im.size
-            garment_im = garment_im.convert("RGBA")
-            combined = person_im.copy().convert("RGBA")
-            gw = int(pw * 0.75)
-            gh = int(ph * 0.44)
-            g_resized = garment_im.resize((gw, gh), Image.Resampling.LANCZOS)
-            gx = (pw - gw) // 2
-            gy = int(ph * 0.30)
-            combined.paste(g_resized, (gx, gy), g_resized)
-            final_rgb = combined.convert("RGB")
-            final_rgb.save(output_path, "JPEG", quality=95)
-            return output_path
+        logger.error("[TRYON ERROR] Generic paste fallback rejected. Flat-lay photo paste is strictly forbidden.")
+        raise RuntimeError("Generic flat-lay paste is forbidden. AI Try-On generation failed.")

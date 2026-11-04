@@ -108,6 +108,38 @@ const el = {
 // ========================================================
 // INITIALIZATION
 // ========================================================
+/**
+ * Fast Client-Side Image Compressor (max 1024px JPEG @ 0.8 quality)
+ */
+async function compressImageBlob(blob, maxDim = 1024, quality = 0.8) {
+  if (!blob) return blob;
+  try {
+    const bitmap = await createImageBitmap(blob);
+    let w = bitmap.width;
+    let h = bitmap.height;
+    if (w > maxDim || h > maxDim) {
+      if (w > h) {
+        h = Math.round((h * maxDim) / w);
+        w = maxDim;
+      } else {
+        w = Math.round((w * maxDim) / h);
+        h = maxDim;
+      }
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    return new Promise((resolve) => {
+      canvas.toBlob((b) => resolve(b || blob), "image/jpeg", quality);
+    });
+  } catch (e) {
+    console.warn("Client compression fallback:", e);
+    return blob;
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   renderUniversalCatalog();
   renderDemoModels();
@@ -457,18 +489,24 @@ async function generateUniversalTryOn() {
   }, 1000);
 
   try {
-    // 1. Resolve Person Blob
+    // 1. Resolve & Compress Person Blob (max 1024px JPEG 0.8)
     let pBlob = state.personBlob;
     if (!pBlob && state.personDataUrl) {
       const pRes = await fetch(state.personDataUrl);
       pBlob = await pRes.blob();
     }
+    if (pBlob) {
+      pBlob = await compressImageBlob(pBlob, 1024, 0.8);
+    }
 
-    // 2. Resolve Garment Blob
+    // 2. Resolve & Compress Garment Blob (max 1024px JPEG 0.8)
     let gBlob = state.selectedGarment.file;
     if (!gBlob) {
       const gRes = await fetch(state.selectedGarment.img);
       gBlob = await gRes.blob();
+    }
+    if (gBlob) {
+      gBlob = await compressImageBlob(gBlob, 1024, 0.8);
     }
 
     // 3. Prepare FormData for /api/tryon
@@ -504,21 +542,38 @@ async function generateUniversalTryOn() {
     clearInterval(state.timerInterval);
 
     if (data.status === "completed" && data.result_url) {
+      // Strictly reject if API returns product image fallback
+      const gImg = state.selectedGarment.img || "";
+      const baseGImg = gImg.split("/").pop();
+      if (data.result_url === gImg || (baseGImg && data.result_url.endsWith(baseGImg))) {
+        throw new Error("AI Try-On returned flat-lay product fallback. Strictly rejected by safety validator.");
+      }
       showTryOnSuccess(data.result_url);
     } else {
-      throw new Error(data.error || "Try-On generation did not return a valid result.");
+      throw new Error(data.error || data.detail || "Try-On generation failed. Please try again.");
     }
   } catch (err) {
     clearInterval(state.timerInterval);
     console.error("Universal try-on error:", err);
-    alert(`Try-on error: ${err.message || String(err)}. Falling back to preview.`);
-    showTryOnSuccess(state.selectedGarment.img);
+    showTryOnError(err.message || String(err));
+  }
+}
+
+function showTryOnError(message) {
+  if (el.resultLoadingBox) el.resultLoadingBox.classList.add("hidden");
+  if (el.resultSuccessBox) el.resultSuccessBox.classList.add("hidden");
+  if (el.resultErrorBox) {
+    el.resultErrorBox.classList.remove("hidden");
+    if (el.resultErrorMessage) {
+      el.resultErrorMessage.textContent = message || "AI Try-On failed to generate a photorealistic fit. Raw product fallback is rejected.";
+    }
   }
 }
 
 function showTryOnSuccess(resultUrl) {
-  el.resultLoadingBox.classList.add("hidden");
-  el.resultSuccessBox.classList.remove("hidden");
+  if (el.resultLoadingBox) el.resultLoadingBox.classList.add("hidden");
+  if (el.resultErrorBox) el.resultErrorBox.classList.add("hidden");
+  if (el.resultSuccessBox) el.resultSuccessBox.classList.remove("hidden");
 
   const fullResultUrl = resultUrl.startsWith("http") ? resultUrl : `${API_BASE}${resultUrl}`;
   
@@ -703,6 +758,9 @@ function bindAppEvents() {
   }
   if (el.btnGenerateUniversalTryOn) {
     el.btnGenerateUniversalTryOn.addEventListener("click", generateUniversalTryOn);
+  }
+  if (el.btnRetryTryOn) {
+    el.btnRetryTryOn.addEventListener("click", generateUniversalTryOn);
   }
   if (el.btnBackToScreen2) el.btnBackToScreen2.addEventListener("click", () => goToStep(2));
 

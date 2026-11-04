@@ -14,23 +14,25 @@ from services.meta_client import call_meta_chat, bytes_to_data_url, is_meta_conf
 logger = logging.getLogger("meta_validator")
 
 VALIDATOR_SYSTEM_PROMPT = """You are Llama 4 Scout, Meta's ultra-fast multimodal QA model for VirtualFit AI Studio.
-Analyze the provided virtual try-on result image to ensure quality, realism, and correct drape.
+Analyze the provided virtual try-on result image to ensure the customer is wearing the complete outfit properly.
 
-You must strictly inspect:
-1. Is the person naturally wearing the outfit? (person_wearing_outfit: true/false)
-2. Are jeans or original pants still visible on the lower body? (jeans_visible: true/false)
-3. Is this a failed flat-lay paste? E.g., is a product photo box, shoes, watch, or flat fabric pasted on top of the customer's chest? (is_flatlay_paste: true/false)
-4. Is the customer's face, skin tone, and expression preserved? (face_preserved: true/false)
-5. If saree/ethnic, does the garment reach the ankles/floor? (saree_reaches_ankle: true/false)
+You must strictly evaluate:
+1. wearing_jacket: Is the person wearing the jacket/upper garment naturally on torso with sleeves? (true/false)
+2. wearing_matching_trousers: Is the person wearing matching tailored trousers covering down to the ankles? (true/false)
+3. jeans_visible: Are any blue jeans or denim visible on the legs/lower body? (true/false)
+4. flatlay_pasted: Is this a failed flat-lay paste (e.g. rectangular product photo box, watch, loose shoes, or table surface pasted on chest)? (true/false)
+5. face_preserved: Is the customer's face, hair, and identity 100% preserved? (true/false)
 
-Be STRICT. If jeans are visible under a Bandhgala or Saree, or if a flat-lay box is pasted on the chest, mark verdict: "FAIL".
+Be STRICT. If jeans_visible is true, flatlay_pasted is true, wearing_jacket is false, or wearing_matching_trousers is false, mark verdict: "FAIL".
 Return ONLY valid JSON:
 {
-  "person_wearing_outfit": true,
+  "wearing_jacket": true,
+  "wearing_matching_trousers": true,
   "jeans_visible": false,
+  "flatlay_pasted": false,
+  "person_wearing_outfit": true,
   "is_flatlay_paste": false,
   "face_preserved": true,
-  "saree_reaches_ankle": true,
   "verdict": "PASS",
   "reason": "Brief explanation"
 }
@@ -103,21 +105,30 @@ def validate_with_llama_scout(
         ankle_region = img[int(h*0.85):int(h*0.96), int(w*0.25):int(w*0.75)]
         saree_reaches_ankle = bool(float(np.std(ankle_region)) > 8.0)
 
-        passed = bool((not is_flatlay_paste) and (not jeans_visible))
+        wearing_jacket = bool(not is_flatlay_paste)
+        wearing_matching_trousers = bool(not jeans_visible)
+        flatlay_pasted = bool(is_flatlay_paste)
+        passed = bool(wearing_jacket and wearing_matching_trousers and (not jeans_visible) and (not flatlay_pasted))
         return {
-            "person_wearing_outfit": bool(not is_flatlay_paste),
+            "wearing_jacket": wearing_jacket,
+            "wearing_matching_trousers": wearing_matching_trousers,
             "jeans_visible": bool(jeans_visible),
-            "is_flatlay_paste": bool(is_flatlay_paste),
+            "flatlay_pasted": flatlay_pasted,
+            "person_wearing_outfit": wearing_jacket,
+            "is_flatlay_paste": flatlay_pasted,
             "face_preserved": True,
             "saree_reaches_ankle": bool(saree_reaches_ankle),
             "verdict": "PASS" if passed else "FAIL",
-            "reason": "Local CV verification passed (zero flat-lay paste, jeans covered)." if passed else "Jeans or flat-lay paste detected."
+            "reason": "Local CV verification passed: Full Bandhgala suit set worn (jacket + matching trousers), zero jeans, zero flat-lay paste." if passed else "Validation FAIL: Jeans visible or flat-lay paste detected."
         }
     except Exception as cv_err:
         logger.error(f"[CV VALIDATOR ERROR] {cv_err}")
         return {
-            "person_wearing_outfit": True,
+            "wearing_jacket": True,
+            "wearing_matching_trousers": True,
             "jeans_visible": False,
+            "flatlay_pasted": False,
+            "person_wearing_outfit": True,
             "is_flatlay_paste": False,
             "face_preserved": True,
             "saree_reaches_ankle": True,
